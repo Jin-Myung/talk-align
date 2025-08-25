@@ -1,4 +1,4 @@
-Real-time sermon alignment tool using VAD and Whisper STT (Faster Whisper). Matches live speech with a prepared script and displays the current line.
+Real-time talk alignment tool using VAD and Whisper STT (Faster Whisper). Matches live speech with a prepared script and displays the current line. By default, Korean speech is recognized (Other languages could be supported upon requests).
 
 ## Installation (for MacOS)
 
