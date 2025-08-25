@@ -1,6 +1,7 @@
 import sys, pyaudio, numpy as np, queue, threading, webrtcvad
 from faster_whisper import WhisperModel
 from rapidfuzz import process, fuzz
+import signal
 
 # ================================
 # 1. 대본 읽기
@@ -22,15 +23,18 @@ model = WhisperModel("small", device="cpu", compute_type="int8")
 
 RATE = 16000
 FRAME_DURATION = 30
-FRAME_SIZE = int(RATE * FRAME_DURATION / 1000)
+FRAME_SIZE = int(RATE * FRAME_DURATION / 1000)  # 480 samples
 FORMAT = pyaudio.paInt16
 
-vad = webrtcvad.Vad(1)  # 민감도 설정 (0-3): 3이 가장 민감
+vad = webrtcvad.Vad(1)   # 민감도 설정 (0=느슨, 3=엄격)
 
 audio_q = queue.Queue()
 running = True
 current_index = 0  # 대본 진행 위치
 
+# ================================
+# 3. 오디오 캡처 스레드
+# ================================
 def audio_capture():
     pa = pyaudio.PyAudio()
     stream = pa.open(format=FORMAT, channels=1, rate=RATE,
@@ -44,10 +48,15 @@ def audio_capture():
         stream.close()
         pa.terminate()
 
+# ================================
+# 4. VAD + STT + 대본 매칭
+# ================================
 def vad_loop():
     global current_index
     buffer = []
     is_speaking = False
+    threshold = 70  # 유사도 임계치
+
     while running or not audio_q.empty():
         try:
             frame = audio_q.get(timeout=0.1)
@@ -69,26 +78,27 @@ def vad_loop():
 
                 if text:
                     # ================================
-                    # 3. 대본과 비교
+                    # 대본과 비교
                     # ================================
                     match, score, idx = process.extractOne(
                         text, script_lines, scorer=fuzz.partial_ratio
                     )
-                    if score > 50:  # 임계치 (실험적으로 조정 가능)
+                    if score >= threshold:
                         current_index = idx
                         print(f"\n📝 인식: {text}")
                         print(f"➡️ 대본[{idx}]: {match} (유사도 {score}%)")
                     else:
                         print(f"\n📝 인식: {text}")
-                        print("❓ 대본과 매칭 실패")
+                        print(f"❓ 대본과 매칭 실패 (유사도 {score}%)")
 
                 buffer = []
                 is_speaking = False
 
+    print("🛑 VAD loop stopped")
+
 # ================================
-# 4. 실행
+# 5. Graceful Shutdown
 # ================================
-import signal
 def signal_handler(sig, frame):
     global running
     print("\n🛑 종료 중...")
@@ -96,6 +106,9 @@ def signal_handler(sig, frame):
 
 signal.signal(signal.SIGINT, signal_handler)
 
+# ================================
+# 6. 실행
+# ================================
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, daemon=True)
 
@@ -104,4 +117,3 @@ t2.start()
 t1.join()
 t2.join()
 print("✅ 종료 완료")
-
