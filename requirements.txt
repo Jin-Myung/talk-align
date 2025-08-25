@@ -2,5 +2,5 @@ faster_whisper
 numpy
 pyaudio
 rapidfuzz
-webrtcvad
+webrtcvad-wheels
 
