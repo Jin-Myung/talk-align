@@ -90,10 +90,9 @@ def vad_loop():
                     if score >= threshold:
                         current_index = idx
                         print(f"\nRecognized: {text}")
-                        print(f"Script[{idx}]: {match} (similarity {score}%)")
+                        print(f"[{idx}]: {match} (similarity {score}%)")
                     else:
-                        print(f"\nRecognized: {text}")
-                        print(f"No matching script (similarity {score}%)")
+                        print(f"\nRecognized: {text} - No matching script (similarity {score}%)")
 
                 buffer = []
                 is_speaking = False
