@@ -78,11 +78,17 @@ def vad_loop():
 
                 if text:
                     # ================================
-                    # 대본과 비교
+                    # 대본과 비교 (현재 라인부터 앞으로 3줄까지만)
                     # ================================
-                    match, score, idx = process.extractOne(
-                        text, script_lines, scorer=fuzz.partial_ratio
+                    start = current_index
+                    end = min(len(script_lines), current_index + 4)
+                    search_range = script_lines[start:end]
+
+                    match, score, idx_rel = process.extractOne(
+                        text, search_range, scorer=fuzz.partial_ratio
                     )
+                    idx = start + idx_rel
+
                     if score >= threshold:
                         current_index = idx
                         print(f"\n📝 인식: {text}")
