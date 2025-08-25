@@ -4,20 +4,20 @@ from rapidfuzz import process, fuzz
 import signal
 
 # ================================
-# 1. 대본 읽기
+# 1. Load script file
 # ================================
 if len(sys.argv) < 2:
-    print("사용법: python vad_align.py <script.txt>")
+    print("Usage: python vad_align.py <script.txt>")
     sys.exit(1)
 
 script_file = sys.argv[1]
 with open(script_file, "r", encoding="utf-8") as f:
     script_lines = [line.strip() for line in f if line.strip()]
 
-print(f"📖 대본 로드 완료 ({len(script_lines)} 줄)")
+print(f"Script loaded ({len(script_lines)} lines)")
 
 # ================================
-# 2. 모델/오디오/VAD 초기화
+# 2. Initialize model / audio / VAD
 # ================================
 model = WhisperModel("small", device="cpu", compute_type="int8")
 
@@ -26,14 +26,14 @@ FRAME_DURATION = 30
 FRAME_SIZE = int(RATE * FRAME_DURATION / 1000)  # 480 samples
 FORMAT = pyaudio.paInt16
 
-vad = webrtcvad.Vad(1)   # 민감도 설정 (0=느슨, 3=엄격)
+vad = webrtcvad.Vad(1)   # VAD sensitivity (0=permissive, 3=aggressive)
 
 audio_q = queue.Queue()
 running = True
-current_index = 0  # 대본 진행 위치
+current_index = 0  # current script line index
 
 # ================================
-# 3. 오디오 캡처 스레드
+# 3. Audio capture thread
 # ================================
 def audio_capture():
     pa = pyaudio.PyAudio()
@@ -49,13 +49,13 @@ def audio_capture():
         pa.terminate()
 
 # ================================
-# 4. VAD + STT + 대본 매칭
+# 4. VAD + STT + Script alignment
 # ================================
 def vad_loop():
     global current_index
     buffer = []
     is_speaking = False
-    threshold = 70  # 유사도 임계치
+    threshold = 70  # similarity threshold
 
     while running or not audio_q.empty():
         try:
@@ -71,15 +71,13 @@ def vad_loop():
             is_speaking = True
         else:
             if is_speaking and buffer:
-                # 발화 종료 → STT 실행
+                # Speech ended → run STT
                 audio = np.frombuffer(b"".join(buffer), np.int16).astype(np.float32) / 32768.0
                 segments, _ = model.transcribe(audio, language="ko", beam_size=1)
                 text = "".join(seg.text for seg in segments).strip()
 
                 if text:
-                    # ================================
-                    # 대본과 비교 (현재 라인부터 앞으로 3줄까지만)
-                    # ================================
+                    # Compare with script (search current line ~ next 3 lines)
                     start = current_index
                     end = min(len(script_lines), current_index + 4)
                     search_range = script_lines[start:end]
@@ -91,29 +89,29 @@ def vad_loop():
 
                     if score >= threshold:
                         current_index = idx
-                        print(f"\n📝 인식: {text}")
-                        print(f"➡️ 대본[{idx}]: {match} (유사도 {score}%)")
+                        print(f"\nRecognized: {text}")
+                        print(f"Script[{idx}]: {match} (similarity {score}%)")
                     else:
-                        print(f"\n📝 인식: {text}")
-                        print(f"❓ 대본과 매칭 실패 (유사도 {score}%)")
+                        print(f"\nRecognized: {text}")
+                        print(f"No matching script (similarity {score}%)")
 
                 buffer = []
                 is_speaking = False
 
-    print("🛑 VAD loop stopped")
+    print("VAD loop stopped")
 
 # ================================
-# 5. Graceful Shutdown
+# 5. Graceful shutdown
 # ================================
 def signal_handler(sig, frame):
     global running
-    print("\n🛑 종료 중...")
+    print("\nShutting down...")
     running = False
 
 signal.signal(signal.SIGINT, signal_handler)
 
 # ================================
-# 6. 실행
+# 6. Run
 # ================================
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, daemon=True)
@@ -122,4 +120,4 @@ t1.start()
 t2.start()
 t1.join()
 t2.join()
-print("✅ 종료 완료")
+print("Shutdown complete")
