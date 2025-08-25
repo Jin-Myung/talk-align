@@ -1,3 +1,5 @@
+Real-time sermon alignment tool using VAD and Whisper STT (Faster Whisper). Matches live speech with a prepared script and displays the current line.
+
 ## Installation (for MacOS)
 
 1. git clone this package.
