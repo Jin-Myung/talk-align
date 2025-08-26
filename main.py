@@ -14,8 +14,6 @@ script_file = sys.argv[1]
 with open(script_file, "r", encoding="utf-8") as f:
     script_lines = [line.strip() for line in f if line.strip()]
 
-print(f"Script loaded ({len(script_lines)} lines)")
-
 # ================================
 # 2. Initialize model / audio / VAD
 # ================================
@@ -117,6 +115,8 @@ t2 = threading.Thread(target=vad_loop, daemon=True)
 
 t1.start()
 t2.start()
+print(f"Ready to align your speech with the script ({len(script_lines)} lines). Press Ctrl+C to stop.")
+
 t1.join()
 t2.join()
 print("Shutdown complete")
