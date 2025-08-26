@@ -94,20 +94,18 @@ def process_utterance(utter, pending_utter_text, pending_utter_len, current_line
 
                 if score >= SCRIPT_MATCH_THRESHOLD:
                     current_line_in_script = idx
-                    print(f"[{idx}]: {match} (similarity {score}%)")
+                    print(f"[{idx}]: {match} (similarity {score:.3f}%)")
                 else:
-                    print(f"No matching script (similarity {score}%)")
+                    print(f"No matching script (similarity {score:.3f}%)")
             else:
                 print("No matching script (end of script window)")
 
             pending_utter_text = ""
-
-            print(f"combined_ms={combined_ms}, utter_ms={utter_ms}")
             pending_utter_len = 0
         else:
             pending_utter_text = combined_text
             pending_utter_len = combined_ms
-            print(f"\nRecognized (buffering): {raw_text} | "
+            print(f"\nToo short utterance: {raw_text} | "
                   f"chars={significant_len(pending_utter_text)}/{MIN_UTTER_TEXT_LEN_FOR_MATCH}, "
                   f"ms={pending_utter_len}/{MIN_UTTER_LEN_IN_MS_FOR_MATCH}")
 
