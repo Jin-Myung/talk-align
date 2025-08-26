@@ -1,7 +1,7 @@
 import sys, pyaudio, numpy as np, queue, threading, webrtcvad
 from faster_whisper import WhisperModel
 from rapidfuzz import process, fuzz
-import signal
+import signal, re
 
 # ================================
 # 1. Load script file
@@ -31,6 +31,17 @@ running = True
 current_index = 0  # current script line index
 
 # ================================
+# Min chunk length thresholds
+# ================================
+MIN_CHARS_FOR_MATCH = 6      # require at least 6 significant chars
+MIN_MS_FOR_MATCH = 1000      # and at least 1 sec of speech
+
+# keep letters/digits/Hangul when counting significant chars
+_sig_re = re.compile(r"[A-Za-z0-9\u3131-\u318E\uAC00-\uD7A3]")
+def significant_len(s: str) -> int:
+    return len(_sig_re.findall(s))
+
+# ================================
 # 3. Audio capture thread
 # ================================
 def audio_capture():
@@ -55,6 +66,10 @@ def vad_loop():
     is_speaking = False
     threshold = 70  # similarity threshold
 
+    # NEW: pending buffers for AND condition
+    pending_text = ""
+    pending_ms = 0
+
     while running or not audio_q.empty():
         try:
             frame = audio_q.get(timeout=0.1)
@@ -69,28 +84,50 @@ def vad_loop():
             is_speaking = True
         else:
             if is_speaking and buffer:
-                # Speech ended → run STT
+                # Speech ended → run STT for this utterance
                 audio = np.frombuffer(b"".join(buffer), np.int16).astype(np.float32) / 32768.0
+                utter_ms = int(len(audio) / RATE * 1000)
+
                 segments, _ = model.transcribe(audio, language="ko", beam_size=1)
-                text = "".join(seg.text for seg in segments).strip()
+                raw_text = "".join(seg.text for seg in segments).strip()
 
-                if text:
-                    # Compare with script (search current line ~ next 3 lines)
-                    start = current_index
-                    end = min(len(script_lines), current_index + 4)
-                    search_range = script_lines[start:end]
+                if raw_text:
+                    # AND condition buffering: combine until both thresholds met
+                    combined_text = (pending_text + " " + raw_text).strip() if pending_text else raw_text
+                    combined_ms = pending_ms + utter_ms
 
-                    match, score, idx_rel = process.extractOne(
-                        text, search_range, scorer=fuzz.partial_ratio
-                    )
-                    idx = start + idx_rel
+                    if significant_len(combined_text) >= MIN_CHARS_FOR_MATCH and combined_ms >= MIN_MS_FOR_MATCH:
+                        # thresholds satisfied → align now
+                        print(f"\nRecognized: {combined_text}")
 
-                    if score >= threshold:
-                        current_index = idx
-                        print(f"\nRecognized: {text}")
-                        print(f"[{idx}]: {match} (similarity {score}%)")
+                        start = current_index
+                        end = min(len(script_lines), current_index + 4)  # current .. current+3
+                        search_range = script_lines[start:end]
+
+                        if search_range:
+                            match, score, idx_rel = process.extractOne(
+                                combined_text, search_range, scorer=fuzz.partial_ratio
+                            )
+                            idx = start + idx_rel
+
+                            if score >= threshold:
+                                current_index = idx
+                                print(f"[{idx}]: {match} (similarity {score}%)")
+                            else:
+                                print(f"No matching script (similarity {score}%)")
+                        else:
+                            print("No matching script (end of script window)")
+
+                        # clear pending after alignment
+                        pending_text = ""
+                        pending_ms = 0
                     else:
-                        print(f"\nRecognized: {text} - No matching script (similarity {score}%)")
+                        # keep buffering
+                        pending_text = combined_text
+                        pending_ms = combined_ms
+                        print(f"\nRecognized (buffering): {raw_text} | "
+                              f"chars={significant_len(pending_text)}/{MIN_CHARS_FOR_MATCH}, "
+                              f"ms={pending_ms}/{MIN_MS_FOR_MATCH}")
 
                 buffer = []
                 is_speaking = False
