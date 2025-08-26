@@ -4,7 +4,7 @@ from rapidfuzz import process, fuzz
 import signal, re
 
 # ================================
-# 1. Load script file
+# Load script file
 # ================================
 if len(sys.argv) < 2:
     print("Usage: python vad_align.py <script.txt>")
@@ -15,7 +15,7 @@ with open(script_file, "r", encoding="utf-8") as f:
     script_lines = [line.strip() for line in f if line.strip()]
 
 # ================================
-# 2. Initialize model / audio / VAD
+# Initialize model / audio / VAD
 # ================================
 model = WhisperModel("small", device="cpu", compute_type="int8")
 
@@ -30,18 +30,19 @@ rt_audio_q = queue.Queue()
 running = True
 
 # ================================
-# Min chunk length thresholds
+# Utterance length thresholds for script matching
 # ================================
-MIN_CHARS_FOR_MATCH = 6      # require at least 6 significant chars
-MIN_MS_FOR_MATCH = 1000      # and at least 1 sec of speech
-
-# keep letters/digits/Hangul when counting significant chars
-_sig_re = re.compile(r"[A-Za-z0-9\u3131-\u318E\uAC00-\uD7A3]")
-def significant_len(s: str) -> int:
-    return len(_sig_re.findall(s))
+MIN_UTTER_TEXT_LEN_FOR_MATCH = 6      # require at least 6 significant chars
+MIN_UTTER_LEN_IN_MS_FOR_MATCH = 1000  # and at least 1 sec of speech
+MAX_UTTER_LEN_IN_MS = 10000  # truncate utterance to 10 sec in case of no silence
 
 # ================================
-# 3. Audio capture thread
+# Script matching threshold
+# ================================
+SCRIPT_MATCH_THRESHOLD = 70  # require at least 70% similarity
+
+# ================================
+# Audio capture thread
 # ================================
 def audio_capture():
     pa = pyaudio.PyAudio()
@@ -57,13 +58,68 @@ def audio_capture():
         pa.terminate()
 
 # ================================
-# 4. VAD + STT + Script alignment
+# Keep letters/digits/Hangul when counting significant chars
+# ================================
+_sig_re = re.compile(r"[A-Za-z0-9\u3131-\u318E\uAC00-\uD7A3]")
+def significant_len(s: str) -> int:
+    return len(_sig_re.findall(s))
+
+# ================================
+# Process utterance: STT + script alignment
+# ================================
+def process_utterance(utter, pending_utter_text, pending_utter_len, current_line_in_script):
+    normalized_utter = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
+    utter_ms = int(len(normalized_utter) / RATE * 1000)
+
+    segments, _ = model.transcribe(normalized_utter, language="ko", beam_size=1)
+    raw_text = "".join(seg.text for seg in segments).strip()
+
+    if raw_text:
+        combined_text = (pending_utter_text + " " + raw_text).strip() if pending_utter_text else raw_text
+        combined_ms = pending_utter_len + utter_ms
+
+        if significant_len(combined_text) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
+
+            print(f"\nRecognized: {combined_text}")
+
+            start = max(0, current_line_in_script - 1)
+            end = min(len(script_lines), current_line_in_script + 4)
+            search_range = script_lines[start:end]
+
+            if search_range:
+                match, score, idx_rel = process.extractOne(
+                    combined_text, search_range, scorer=fuzz.partial_ratio
+                )
+                idx = start + idx_rel
+
+                if score >= SCRIPT_MATCH_THRESHOLD:
+                    current_line_in_script = idx
+                    print(f"[{idx}]: {match} (similarity {score}%)")
+                else:
+                    print(f"No matching script (similarity {score}%)")
+            else:
+                print("No matching script (end of script window)")
+
+            pending_utter_text = ""
+
+            print(f"combined_ms={combined_ms}, utter_ms={utter_ms}")
+            pending_utter_len = 0
+        else:
+            pending_utter_text = combined_text
+            pending_utter_len = combined_ms
+            print(f"\nRecognized (buffering): {raw_text} | "
+                  f"chars={significant_len(pending_utter_text)}/{MIN_UTTER_TEXT_LEN_FOR_MATCH}, "
+                  f"ms={pending_utter_len}/{MIN_UTTER_LEN_IN_MS_FOR_MATCH}")
+
+    return pending_utter_text, pending_utter_len, current_line_in_script
+
+# ================================
+# VAD + utterance processing loop
 # ================================
 def vad_loop():
     current_line_in_script = 0
     utter = []
     in_utter = False
-    script_matching_threshold = 70
 
     # If an utterance is too short, we buffer it and prepend to the next one rather than matching a script line.
     pending_utter_text = ""
@@ -101,52 +157,22 @@ def vad_loop():
             utter.append(frame)
             if is_speech:
                 silence_count = 0
+                if len(utter) * FRAME_DURATION >= MAX_UTTER_LEN_IN_MS:
+                    # Force process if utterance too long
+                    pending_utter_text, pending_utter_len, current_line_in_script = process_utterance(
+                        utter, pending_utter_text, pending_utter_len, current_line_in_script
+                    )
+                    # reset for next utterance
+                    in_utter = False
+                    speech_count = 0
+                    utter = []
+
             else:
                 silence_count += 1
                 if silence_count >= silence_end_frames:
-                    normalized_utter = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
-                    utter_ms = int(len(normalized_utter) / RATE * 1000)
-
-                    segments, _ = model.transcribe(normalized_utter, language="ko", beam_size=1)
-                    raw_text = "".join(seg.text for seg in segments).strip()
-
-                    if raw_text:
-                        combined_text = (pending_utter_text + " " + raw_text).strip() if pending_utter_text else raw_text
-                        combined_ms = pending_utter_len + utter_ms
-
-                        if (significant_len(combined_text) >= MIN_CHARS_FOR_MATCH and combined_ms >= MIN_MS_FOR_MATCH):
-
-                            print(f"\nRecognized: {combined_text}")
-
-                            start = max(0, current_line_in_script - 1)
-                            end = min(len(script_lines), current_line_in_script + 4)
-                            search_range = script_lines[start:end]
-
-                            if search_range:
-                                match, score, idx_rel = process.extractOne(
-                                    combined_text, search_range, scorer=fuzz.partial_ratio
-                                )
-                                idx = start + idx_rel
-
-                                if score >= script_matching_threshold:
-                                    current_line_in_script = idx
-                                    print(f"[{idx}]: {match} (similarity {score}%)")
-                                else:
-                                    print(f"No matching script (similarity {score}%)")
-                            else:
-                                print("No matching script (end of script window)")
-
-                            pending_utter_text = ""
-
-                            print(f"combined_ms={combined_ms}, utter_ms={utter_ms}")
-                            pending_utter_len = 0
-                        else:
-                            pending_utter_text = combined_text
-                            pending_utter_len = combined_ms
-                            print(f"\nRecognized (buffering): {raw_text} | "
-                                  f"chars={significant_len(pending_utter_text)}/{MIN_CHARS_FOR_MATCH}, "
-                                  f"ms={pending_utter_len}/{MIN_MS_FOR_MATCH}")
-
+                    pending_utter_text, pending_utter_len, current_line_in_script = process_utterance(
+                        utter, pending_utter_text, pending_utter_len, current_line_in_script
+                    )
                     # reset for next utterance
                     in_utter = False
                     speech_count = 0
@@ -154,7 +180,7 @@ def vad_loop():
                     utter = []
 
 # ================================
-# 5. Graceful shutdown
+# Graceful shutdown
 # ================================
 def signal_handler(sig, frame):
     global running
@@ -164,7 +190,7 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 # ================================
-# 6. Run
+# Run
 # ================================
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, daemon=True)
