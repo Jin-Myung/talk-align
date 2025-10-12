@@ -2,18 +2,125 @@ import sys, pyaudio, numpy as np, queue, threading, webrtcvad
 from faster_whisper import WhisperModel
 from rapidfuzz import process, fuzz
 import signal, re
+from typing import Dict, List, Tuple
 from wsbridge import WSBridge
 
 # ================================
 # Load script file
 # ================================
-if len(sys.argv) < 2:
-    print("Usage: python vad_align.py <script.txt>")
+if len(sys.argv) < 3:
+    print("Usage: python main.py <ko_script.txt> <en_prompt.txt>")
     sys.exit(1)
 
-script_file = sys.argv[1]
-with open(script_file, "r", encoding="utf-8") as f:
-    script_lines = [line.strip() for line in f if line.strip()]
+ko_file = sys.argv[1]
+en_file = sys.argv[2]
+
+print("ko_file:", ko_file)
+print("en_file:", en_file)
+
+# ================================
+# Sentence splitter (language-agnostic, simple)
+# - splits on [.?!], keeps delimiters
+# - collapses spaces/newlines
+# ================================
+_sent_re = re.compile(r'([^.!?]*[.!?]["”\']?)')
+
+def split_sentences(text: str) -> List[str]:
+    text = re.sub(r'\s+', ' ', text.strip())
+    if not text:
+        return []
+    parts = [m.group(0).strip() for m in _sent_re.finditer(text)]
+    parts = [p for p in parts if p]  # remove empties
+    # If tail has no terminal punctuation, include it as a final sentence
+    tail = _sent_re.sub('', text).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+# ================================
+# Paragraph parser
+# - Header lines before first "^\d+\." are ignored
+# - Returns dict: {para_no: ["sent1", "sent2", ...]}
+# ================================
+_para_start_re = re.compile(r'^\s*(\d+)\.\s*(.*)$')
+
+def parse_paragraphs(path: str) -> Dict[int, List[str]]:
+    with open(path, 'r', encoding='utf-8') as f:
+        lines = [ln.rstrip() for ln in f]
+
+    paras: Dict[int, List[str]] = {}
+    cur_no: int = None
+    cur_buf: List[str] = []
+
+    def flush():
+        nonlocal cur_no, cur_buf
+        if cur_no is None:
+            return
+        if cur_no <= len(paras):
+            return
+        paragraph_text = ' '.join([s for s in cur_buf if s.strip()])
+        sents = [s.strip() for s in split_sentences(paragraph_text)]
+        paras[cur_no] = [s for s in sents if s]
+        cur_buf = []
+
+    for ln in lines:
+        m = _para_start_re.match(ln)
+        if m:
+            # new paragraph
+            flush()
+            cur_no = int(m.group(1))
+            tail = m.group(2) or ""
+            cur_buf = [tail] if tail.strip() else []
+        else:
+            # header or paragraph body continuation
+            if cur_no is not None:
+                cur_buf.append(ln)
+
+    flush()
+    return paras
+
+# Load KO & EN paragraphs
+ko_paras = parse_paragraphs(ko_file)
+en_paras = parse_paragraphs(en_file)
+
+if not ko_paras:
+    print("Korean script has no paragraphs starting with '<n>.'")
+    sys.exit(1)
+if not en_paras:
+    print("English prompt has no paragraphs starting with '<n>.'")
+    sys.exit(1)
+
+# Build flat alignment list by paragraph order intersection
+para_ids = sorted(set(ko_paras.keys()) & set(en_paras.keys()))
+if not para_ids:
+    print("No common paragraph numbers between KO/EN files.")
+    sys.exit(1)
+
+aligned_ko: List[str] = []
+aligned_en: List[str] = []
+aligned_tag: List[str] = []  # e.g., "1.2"
+
+for p in para_ids:
+    ko_sents = ko_paras[p]
+    en_sents = en_paras[p]
+    if len(ko_sents) != len(en_sents):
+        print(f"Warning: sentence count mismatch in paragraph {p}: KO={len(ko_sents)} vs EN={len(en_sents)}")
+        # choose min length to stay safe
+    n = min(len(ko_sents), len(en_sents))
+    for i in range(n):
+        aligned_ko.append(ko_sents[i])
+        aligned_en.append(en_sents[i])
+        aligned_tag.append(f"{p}.{i+1}")
+
+if not aligned_ko:
+    print("No aligned sentences after parsing.")
+    sys.exit(1)
+
+TOTAL = len(aligned_ko)
+print(f"Loaded alignment: {TOTAL} sentences across {len(para_ids)} paragraphs")
+
+# with open(ko_file, "r", encoding="utf-8") as f:
+#     script_lines = [line.strip() for line in f if line.strip()]
 
 # ================================
 # Initialize model / audio / VAD
@@ -66,6 +173,12 @@ def significant_len(s: str) -> int:
     return len(_sig_re.findall(s))
 
 # ================================
+# Utils
+# ================================
+def clamp_idx(i: int) -> int:
+    return max(0, min(TOTAL - 1, i))
+
+# ================================
 # Process utterance: STT + script alignment
 # ================================
 def process_utterance(utter, pending_utter_text, pending_utter_len, current_line_in_script):
@@ -84,9 +197,9 @@ def process_utterance(utter, pending_utter_text, pending_utter_len, current_line
             print(f"\nRecognized: {combined_text}")
             ws.send({"type": "recognize", "text": combined_text})
 
-            start = max(0, current_line_in_script - 1)
-            end = min(len(script_lines), current_line_in_script + 4)
-            search_range = script_lines[start:end]
+            start = clamp_idx(current_line_in_script - 1)
+            end = clamp_idx(current_line_in_script + 4)
+            search_range = aligned_ko[start:end]
 
             if search_range:
                 match, score, idx_rel = process.extractOne(
@@ -96,9 +209,11 @@ def process_utterance(utter, pending_utter_text, pending_utter_len, current_line
 
                 if score >= SCRIPT_MATCH_THRESHOLD:
                     current_line_in_script = idx
-                    next_line = script_lines[idx+1] if idx+1 < len(script_lines) else ""
-                    print(f"[{idx}]: {match} (similarity {score:.3f}%)")
-                    ws.send({"type": "match", "idx": idx, "line": match, "score": round(score, 1), "next": next_line})
+                    tag = aligned_tag[idx]
+                    en_line = aligned_en[idx]
+                    next_line = aligned_en[idx+1] if idx+1 < len(aligned_en) else ""
+                    print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
+                    ws.send({"type": "match", "idx": idx, "tag": tag, "line": en_line, "ko": aligned_ko[idx], "score": round(score, 1), "next": next_line})
                 else:
                     print(f"No matching script (similarity {score:.3f}%)")
                     ws.send({"type":"info", "msg": f"No match ({round(score,1)}%)"})
@@ -111,7 +226,7 @@ def process_utterance(utter, pending_utter_text, pending_utter_len, current_line
         else:
             pending_utter_text = combined_text
             pending_utter_len = combined_ms
-            print(f"\nToo short utterance: {raw_text} | "
+            print(f"\nBuffering: "
                   f"chars={significant_len(pending_utter_text)}/{MIN_UTTER_TEXT_LEN_FOR_MATCH}, "
                   f"ms={pending_utter_len}/{MIN_UTTER_LEN_IN_MS_FOR_MATCH}")
 
@@ -135,10 +250,11 @@ def vad_loop(ws: WSBridge):
     speech_count = 0
     silence_count = 0
 
-    if script_lines:
-        cur = script_lines[current_line_in_script]
-        nxt = script_lines[current_line_in_script + 1] if current_line_in_script + 1 < len(script_lines) else ""
-        ws.send({"type": "match", "idx": current_line_in_script, "line": cur, "score": "", "next": nxt})
+    if aligned_en:
+        tag = aligned_tag[current_line_in_script]
+        cur = aligned_en[current_line_in_script]
+        nxt = aligned_en[current_line_in_script + 1] if current_line_in_script + 1 < len(aligned_en) else ""
+        ws.send({"type": "match", "idx": current_line_in_script, "tag": tag, "line": cur, "ko": aligned_ko[current_line_in_script], "score": "", "next": nxt})
     else:
         ws.send({"type": "info", "msg": "Script is empty."})
 
@@ -147,11 +263,19 @@ def vad_loop(ws: WSBridge):
         if cmd:
             t = cmd.get("type")
             if t == "prev":
-                current_line_in_script = max(0, current_line_in_script - 1)
-                print(f"[OP] prev -> {current_line_in_script}")
+                current_line_in_script = clamp_idx(current_line_in_script - 1)
+                tag = aligned_tag[current_line_in_script]
+                cur_en = aligned_en[current_line_in_script]
+                nxt_en = aligned_en[current_line_in_script + 1] if current_line_in_script + 1 < len(aligned_en) else ""
+                print(f"[OP] prev -> {tag}")
+                ws.send({"type": "match", "idx": current_line_in_script, "tag": tag, "line": cur_en, "ko": aligned_ko[current_line_in_script], "score": "", "next": nxt_en})
             elif t == "next":
-                current_line_in_script = min(len(script_lines)-1, current_line_in_script + 1)
-                print(f"[OP] next -> {current_line_in_script}")
+                current_line_in_script = clamp_idx(current_line_in_script + 1)
+                tag = aligned_tag[current_line_in_script]
+                cur_en = aligned_en[current_line_in_script]
+                nxt_en = aligned_en[current_line_in_script + 1] if current_line_in_script + 1 < len(aligned_en) else ""
+                print(f"[OP] next -> {tag}")
+                ws.send({"type": "match", "idx": current_line_in_script, "tag": tag, "line": cur_en, "ko": aligned_ko[current_line_in_script], "score": "", "next": nxt_en})
 
         try:
             frame = rt_audio_q.get(timeout=0.1)
@@ -223,7 +347,7 @@ t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
 
 t1.start()
 t2.start()
-print(f"Ready to align your speech with the script ({len(script_lines)} lines). Press Ctrl+C to stop.")
+print(f"Ready. KO={ko_file}, EN={en_file}. Total aligned sentences: {TOTAL}. Press Ctrl+C to stop.")
 
 t1.join()
 t2.join()
