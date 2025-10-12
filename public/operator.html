@@ -28,11 +28,13 @@
     try{
       const d = JSON.parse(e.data);
       if(d.type === "recognize"){
-        append("Recognized: " + d.text);
+        append("Recognized (KO): " + d.text);
       }else if(d.type === "match"){
-        cur.textContent  = `[${d.idx}] ${d.line} (${d.score}%)`;
+        // show tag + English line
+        const tag = d.tag ? `[${d.tag}] ` : "";
+        cur.textContent  = `${tag}${d.line}${d.score ? " ("+d.score+"%)" : ""}`;
         next.textContent = d.next || "";
-        append(`Match: [${d.idx}] ${d.line} (${d.score}%)`);
+        append(`Match: ${tag}${d.line}${d.score ? " ("+d.score+"%)" : ""}`);
       }else if(d.type === "info"){
         append(d.msg || "");
       }
