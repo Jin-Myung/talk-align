@@ -1,6 +1,8 @@
+fastapi
 faster_whisper
 numpy
 pyaudio
 rapidfuzz
+uvicorn
 webrtcvad-wheels
-
+websocket-client
