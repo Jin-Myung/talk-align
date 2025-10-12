@@ -2,6 +2,7 @@ import sys, pyaudio, numpy as np, queue, threading, webrtcvad
 from faster_whisper import WhisperModel
 from rapidfuzz import process, fuzz
 import signal, re
+from wsbridge import WSBridge
 
 # ================================
 # Load script file
@@ -81,6 +82,7 @@ def process_utterance(utter, pending_utter_text, pending_utter_len, current_line
         if significant_len(combined_text) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
 
             print(f"\nRecognized: {combined_text}")
+            ws.send({"type": "recognize", "text": combined_text})
 
             start = max(0, current_line_in_script - 1)
             end = min(len(script_lines), current_line_in_script + 4)
@@ -94,11 +96,15 @@ def process_utterance(utter, pending_utter_text, pending_utter_len, current_line
 
                 if score >= SCRIPT_MATCH_THRESHOLD:
                     current_line_in_script = idx
+                    next_line = script_lines[idx+1] if idx+1 < len(script_lines) else ""
                     print(f"[{idx}]: {match} (similarity {score:.3f}%)")
+                    ws.send({"type": "match", "idx": idx, "line": match, "score": round(score, 1), "next": next_line})
                 else:
                     print(f"No matching script (similarity {score:.3f}%)")
+                    ws.send({"type":"info", "msg": f"No match ({round(score,1)}%)"})
             else:
                 print("No matching script (end of script window)")
+                ws.send({"type":"info", "msg":"No matching script (window end)"})
 
             pending_utter_text = ""
             pending_utter_len = 0
@@ -114,7 +120,7 @@ def process_utterance(utter, pending_utter_text, pending_utter_len, current_line
 # ================================
 # VAD + utterance processing loop
 # ================================
-def vad_loop():
+def vad_loop(ws: WSBridge):
     current_line_in_script = 0
     utter = []
     in_utter = False
@@ -129,7 +135,24 @@ def vad_loop():
     speech_count = 0
     silence_count = 0
 
+    if script_lines:
+        cur = script_lines[current_line_in_script]
+        nxt = script_lines[current_line_in_script + 1] if current_line_in_script + 1 < len(script_lines) else ""
+        ws.send({"type": "match", "idx": current_line_in_script, "line": cur, "score": "", "next": nxt})
+    else:
+        ws.send({"type": "info", "msg": "Script is empty."})
+
     while running:
+        cmd = ws.get_cmd_nowait()
+        if cmd:
+            t = cmd.get("type")
+            if t == "prev":
+                current_line_in_script = max(0, current_line_in_script - 1)
+                print(f"[OP] prev -> {current_line_in_script}")
+            elif t == "next":
+                current_line_in_script = min(len(script_lines)-1, current_line_in_script + 1)
+                print(f"[OP] next -> {current_line_in_script}")
+
         try:
             frame = rt_audio_q.get(timeout=0.1)
         except queue.Empty:
@@ -145,8 +168,7 @@ def vad_loop():
                 speech_count += 1
                 if speech_count >= speech_start_frames:
                     in_utter = True
-                    utter = []
-                    utter.append(frame)
+                    utter = [frame]
                     silence_count = 0
             else:
                 speech_count = 0
@@ -181,17 +203,23 @@ def vad_loop():
 # Graceful shutdown
 # ================================
 def signal_handler(sig, frame):
-    global running
+    global running, ws
     print("\nShutting down...")
     running = False
+    try:
+        ws.close()
+    except Exception:
+        pass
 
 signal.signal(signal.SIGINT, signal_handler)
 
 # ================================
 # Run
 # ================================
+ws = WSBridge("ws://127.0.0.1:8000/ws")
+
 t1 = threading.Thread(target=audio_capture, daemon=True)
-t2 = threading.Thread(target=vad_loop, daemon=True)
+t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
 
 t1.start()
 t2.start()

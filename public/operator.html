@@ -1,0 +1,41 @@
+<!doctype html><meta charset="utf-8">
+<title>Operator</title>
+<style>
+  body{font:16px/1.5 system-ui, sans-serif; margin:20px}
+  .cur{font-weight:700}
+  .next{opacity:.6;margin-top:6px}
+  button{font:16px;margin-right:8px;padding:8px 14px}
+  #log{margin-top:12px;background:#f7f7f7;padding:8px;max-height:40vh;overflow:auto;white-space:pre-wrap}
+</style>
+<h3>Operator</h3>
+<div class="cur" id="cur"></div>
+<div class="next" id="next"></div>
+<div style="margin-top:12px">
+  <button onclick="send({type:'prev'})">▲ Up</button>
+  <button onclick="send({type:'next'})">▼ Down</button>
+</div>
+<div id="log"></div>
+<script>
+  const log  = document.getElementById('log');
+  const cur  = document.getElementById('cur');
+  const next = document.getElementById('next');
+  const ws   = new WebSocket(`ws://${location.host}/ws`);
+
+  function send(o){ ws.send(JSON.stringify(o)); }
+  function append(s){ log.textContent += s + "\n"; log.scrollTop = log.scrollHeight; }
+
+  ws.onmessage = (e) => {
+    try{
+      const d = JSON.parse(e.data);
+      if(d.type === "recognize"){
+        append("Recognized: " + d.text);
+      }else if(d.type === "match"){
+        cur.textContent  = `[${d.idx}] ${d.line} (${d.score}%)`;
+        next.textContent = d.next || "";
+        append(`Match: [${d.idx}] ${d.line} (${d.score}%)`);
+      }else if(d.type === "info"){
+        append(d.msg || "");
+      }
+    }catch(_){}
+  };
+</script>
