@@ -22,10 +22,14 @@ $ pip install -r requirements.txt
 
 ## Test
 
-1. Run the program with a script file:
+1. Activate the virtual environment:
+```
+$ . venv/bin/activate
+```
+2. Run the program with a script file:
 ```
 $ python main.py input.txt
 ```
 
-2. Speak the lines from the script, and the corresponding part will be displayed.
-3. Ctrl+C to end the program.
+3. Speak the lines from the script, and the corresponding part will be displayed.
+4. Ctrl+C to end the program.
