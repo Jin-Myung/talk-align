@@ -10,6 +10,10 @@ Real-time talk alignment tool using VAD and Whisper STT (Faster Whisper). Matche
 ## Installation for MacOS
 
 1. git clone this package.
+```
+$ git clone https://github.com/Jin-Myung/talk-align.git
+```
+
 2. Change current directory to the cloned package.
 ```
 $ cd talk-align
@@ -56,6 +60,10 @@ $ python main.py input_kor.txt input_eng.txt
 ## Installation for Windows
 
 1. git clone this package.
+```
+$ git clone https://github.com/Jin-Myung/talk-align.git
+```
+
 2. Change current directory to the cloned package.
 ```
 $ cd talk-align
