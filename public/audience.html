@@ -1,21 +1,131 @@
-<!doctype html><meta charset="utf-8">
-<title>Audience</title>
-<style>
-    body{background:#000;color:#fff;font:48px/1.35 system-ui, sans-serif;margin:40px}
-    .cur{margin-bottom:.4em}
-    .next{opacity:.45;font-size:.75em}
-</style>
-<div id="cur" class="cur"></div>
-<div id="next" class="next"></div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Talk Align – Audience</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #container {
+            text-align: center;
+            width: 80%;
+            max-width: 900px;
+        }
+
+        .line {
+            opacity: 0.4;
+            font-size: 1.2em;
+            margin: 8px 0;
+            transition: all 0.5s ease;
+        }
+
+        .line.current {
+            opacity: 1;
+            font-size: 2em;
+            font-weight: 600;
+            color: #ffeb3b;
+        }
+
+        /* fade mode */
+        .fade-enter {
+            opacity: 0;
+        }
+        .fade-enter-active {
+            opacity: 1;
+            transition: opacity var(--anim-speed) ease;
+        }
+
+        /* slide mode */
+        .slide-enter {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        .slide-enter-active {
+            opacity: 1;
+            transform: translateY(0);
+            transition: all var(--anim-speed) ease;
+        }
+    </style>
+</head>
+<body>
+<div id="container"></div>
+
 <script>
     const ws = new WebSocket(`ws://${location.host}/ws`);
-    ws.onmessage = (e) => {
-        try{
-            const d = JSON.parse(e.data);
-            if(d.type === "match"){
-                document.getElementById('cur').textContent  = d.line || "";
-                document.getElementById('next').textContent = d.next || "";
+    const container = document.getElementById("container");
+
+    let lines = [];
+    let currentIdx = 0;
+    let PREV_COUNT = 2;
+    let NEXT_COUNT = 1;
+    let ANIM_MODE = "fade";
+    let ANIM_SPEED = 800; // ms
+
+    function render() {
+        container.innerHTML = "";
+        const start = Math.max(0, currentIdx - PREV_COUNT);
+        const end = Math.min(lines.length, currentIdx + NEXT_COUNT + 1);
+
+        for (let i = start; i < end; i++) {
+            const div = document.createElement("div");
+            div.classList.add("line");
+            if (i === currentIdx) {
+                div.classList.add("current");
+
+                // apply animation class
+                if (ANIM_MODE === "fade") {
+                    div.classList.add("fade-enter");
+                    setTimeout(() => div.classList.add("fade-enter-active"), 10);
+                } else if (ANIM_MODE === "slide") {
+                    div.classList.add("slide-enter");
+                    setTimeout(() => div.classList.add("slide-enter-active"), 10);
+                }
             }
-        }catch(_){}
+            div.textContent = lines[i];
+            container.appendChild(div);
+        }
+
+        // remove animation classes after duration
+        setTimeout(() => {
+            container.querySelectorAll('.fade-enter, .fade-enter-active, .slide-enter, .slide-enter-active')
+                .forEach(el => el.classList.remove('fade-enter', 'fade-enter-active', 'slide-enter', 'slide-enter-active'));
+        }, ANIM_SPEED + 50);
+    }
+
+    // --- WebSocket event handlers ---
+    ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "init") {
+            lines = msg.en_lines;
+            currentIdx = msg.idx ?? 0;
+            if (msg.config) {
+                PREV_COUNT = msg.config.prev_count ?? 2;
+                NEXT_COUNT = msg.config.next_count ?? 1;
+                ANIM_MODE = msg.config.anim ?? "fade";
+                ANIM_SPEED = msg.config.speed ?? 800;
+            }
+            // set animation speed as CSS variable
+            document.documentElement.style.setProperty('--anim-speed', `${ANIM_SPEED}ms`);
+            render();
+        } else if (msg.type === "match") {
+            currentIdx = msg.idx;
+            render();
+        }
+    };
+
+    ws.onopen = () => {
+        console.log("Connected to Talk Align server.");
     };
 </script>
+</body>
+</html>

@@ -234,6 +234,24 @@ def vad_loop(ws: WSBridge):
     speech_count = 0
     silence_count = 0
 
+    # --- Initial audience configuration (x, y only) ---
+    PREV_COUNT = 2
+    NEXT_COUNT = 3
+    ANIM_MODE = "slide"   # or "slide"
+    ANIM_SPEED = 800     # milliseconds
+
+    ws.send({
+        "type": "init",
+        "en_lines": aligned_en,
+        "idx": 0,
+        "config": {
+            "prev_count": PREV_COUNT,
+            "next_count": NEXT_COUNT,
+            "anim": ANIM_MODE,
+            "speed": ANIM_SPEED
+        }
+    })
+
     if aligned_en:
         tag = aligned_tag[current_line_in_script]
         cur = aligned_en[current_line_in_script]
