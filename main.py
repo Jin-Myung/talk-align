@@ -8,6 +8,20 @@ from typing import Dict, List
 import webbrowser
 from wsbridge import WSBridge
 
+# --- Windows console UTF-8 fix ---
+import os
+if os.name == "nt":
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    except Exception:
+        pass
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ================================
 # Args
 # ================================
