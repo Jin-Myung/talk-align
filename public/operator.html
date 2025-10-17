@@ -31,9 +31,7 @@
     overflow-y: auto;
     border-right: 1px solid #ddd;
   }
-  .panel:last-child {
-    border-right: none;
-  }
+  .panel:last-child { border-right: none; }
 
   .para {
     padding: 8px 10px;
@@ -41,9 +39,7 @@
     border-radius: 6px;
     transition: background 0.25s;
   }
-  .para.highlight {
-    background: #fff8b3;
-  }
+  .para.highlight { background: #fff8b3; }
 
   .buttons {
     display: flex;
@@ -90,9 +86,7 @@
   <button id="btnNext">▼ Next Paragraph</button>
 </div>
 
-<div id="status">
-  <div id="log"></div>
-</div>
+<div id="status"><div id="log"></div></div>
 
 <script>
   const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -103,6 +97,7 @@
   let paragraphsKO = [];
   let paragraphsEN = [];
   let curIdx = 0;
+  let lastMatchedIdx = -1;   // ✅ 최근 highlight된 문단 번호 저장
 
   function send(o){ ws.send(JSON.stringify(o)); }
 
@@ -117,8 +112,12 @@
         highlight(curIdx);
       }
       else if (d.type === 'para_match') {
-        highlight(d.para_idx || 0);
-        addLog(`Matched paragraph ${d.para_idx+1}`, true);
+        const newIdx = d.para_idx || 0;
+        if (newIdx !== lastMatchedIdx) {        // ✅ 동일 문단이면 로그 생략
+          highlight(newIdx);
+          addLog(`Matched paragraph ${newIdx + 1}`, true);
+          lastMatchedIdx = newIdx;
+        }
       }
       else if (d.type === 'recognize') {
         addLog(`Recognized: ${d.text}`, false);
@@ -129,7 +128,6 @@
     } catch(_){}
   };
 
-  /* --- 패널 렌더링 --- */
   function renderPanels(){
     koPanel.innerHTML = '';
     enPanel.innerHTML = '';
@@ -146,21 +144,18 @@
     }
   }
 
-  /* --- 하이라이트 --- */
   function highlight(idx){
     curIdx = idx;
     const allKO = koPanel.querySelectorAll('.para');
     const allEN = enPanel.querySelectorAll('.para');
     allKO.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
     allEN.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
-
     const activeKO = allKO[idx];
     const activeEN = allEN[idx];
     if (activeKO) activeKO.scrollIntoView({behavior:'smooth', block:'center'});
     if (activeEN) activeEN.scrollIntoView({behavior:'smooth', block:'center'});
   }
 
-  /* --- 로그 --- */
   function addLog(msg, isMatch=false, isInfo=false){
     const line = document.createElement('div');
     line.className = 'log-line';
@@ -175,23 +170,24 @@
     line.appendChild(t);
     line.appendChild(m);
     log.appendChild(line);
-
     const lines = log.querySelectorAll('.log-line');
     if (lines.length > 6) log.removeChild(lines[0]);
     log.scrollTop = log.scrollHeight;
   }
 
-  /* --- 버튼 동작 --- */
   document.getElementById('btnPrev').addEventListener('click', ()=>{
     curIdx = Math.max(0, curIdx - 1);
     send({type:'prev'});
     highlight(curIdx);
-    addLog(`Moved to paragraph ${curIdx+1}`, true);
+    addLog(`Moved to paragraph ${curIdx + 1}`, true);
+    lastMatchedIdx = curIdx;
   });
+
   document.getElementById('btnNext').addEventListener('click', ()=>{
     curIdx = Math.min(paragraphsKO.length - 1, curIdx + 1);
     send({type:'next'});
     highlight(curIdx);
-    addLog(`Moved to paragraph ${curIdx+1}`, true);
+    addLog(`Moved to paragraph ${curIdx + 1}`, true);
+    lastMatchedIdx = curIdx;
   });
 </script>
