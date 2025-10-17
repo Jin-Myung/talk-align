@@ -81,12 +81,6 @@ $ python -m pip install --upgrade pip
 $ pip install -r requirements.txt
 ```
 
-5. If PyAudio fails to install:
-```
-$ pip install pipwin
-$ pipwin install pyaudio
-```
-
 ## Test for Windows
 
 1. Change current directory to the cloned package.
