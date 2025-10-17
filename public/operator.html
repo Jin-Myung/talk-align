@@ -59,27 +59,19 @@
     cursor: pointer;
   }
 
-  /* 인식 결과 영역 */
   #status {
     background: #f5f5f5;
     padding: 8px 12px;
     border-top: 1px solid #ccc;
     font-family: monospace;
     font-size: 13px;
-    line-height: 1.3;       /* 줄 간격 축소 */
+    line-height: 1.3;
     max-height: 150px;
     overflow-y: auto;
     white-space: pre-wrap;
   }
 
-  .status-title {
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-
-  .log-line {
-    margin: 2px 0;
-  }
+  .log-line { margin: 2px 0; }
   .log-time { color: #999; margin-right: 6px; }
   .log-text { color: #222; }
   .log-match { color: #007a00; font-weight: 600; }
@@ -94,12 +86,11 @@
 </main>
 
 <div class="buttons">
-  <button onclick="send({type:'prev'})">▲ Previous Paragraph</button>
-  <button onclick="send({type:'next'})">▼ Next Paragraph</button>
+  <button id="btnPrev">▲ Previous Paragraph</button>
+  <button id="btnNext">▼ Next Paragraph</button>
 </div>
 
 <div id="status">
-  <div class="status-title">Recognition Log:</div>
   <div id="log"></div>
 </div>
 
@@ -111,37 +102,38 @@
 
   let paragraphsKO = [];
   let paragraphsEN = [];
-  let curIdx = -1;
+  let curIdx = 0;
 
-  /* --- WebSocket --- */
   function send(o){ ws.send(JSON.stringify(o)); }
 
   ws.onmessage = (e) => {
-    try{
+    try {
       const d = JSON.parse(e.data || '{}');
-      if (d.type === 'init_paras'){
+
+      if (d.type === 'init_paras') {
         paragraphsKO = d.ko || [];
         paragraphsEN = d.en || [];
         renderPanels();
+        highlight(curIdx);
       }
-      else if (d.type === 'para_match'){
+      else if (d.type === 'para_match') {
         highlight(d.para_idx || 0);
         addLog(`Matched paragraph ${d.para_idx+1}`, true);
       }
-      else if (d.type === 'recognize'){
+      else if (d.type === 'recognize') {
         addLog(`Recognized: ${d.text}`, false);
       }
-      else if (d.type === 'info'){
+      else if (d.type === 'info') {
         addLog(d.msg || 'Info message', false, true);
       }
-    }catch(_){}
+    } catch(_){}
   };
 
-  /* --- UI 구성 --- */
+  /* --- 패널 렌더링 --- */
   function renderPanels(){
     koPanel.innerHTML = '';
     enPanel.innerHTML = '';
-    for (let i=0; i<paragraphsKO.length; i++){
+    for (let i = 0; i < paragraphsKO.length; i++){
       const p1 = document.createElement('div');
       p1.className = 'para';
       p1.textContent = paragraphsKO[i];
@@ -154,6 +146,7 @@
     }
   }
 
+  /* --- 하이라이트 --- */
   function highlight(idx){
     curIdx = idx;
     const allKO = koPanel.querySelectorAll('.para');
@@ -167,7 +160,7 @@
     if (activeEN) activeEN.scrollIntoView({behavior:'smooth', block:'center'});
   }
 
-  /* --- 로그 관리 --- */
+  /* --- 로그 --- */
   function addLog(msg, isMatch=false, isInfo=false){
     const line = document.createElement('div');
     line.className = 'log-line';
@@ -183,9 +176,22 @@
     line.appendChild(m);
     log.appendChild(line);
 
-    // 최근 5개까지만 유지
     const lines = log.querySelectorAll('.log-line');
-    if (lines.length > 5) log.removeChild(lines[0]);
+    if (lines.length > 6) log.removeChild(lines[0]);
     log.scrollTop = log.scrollHeight;
   }
+
+  /* --- 버튼 동작 --- */
+  document.getElementById('btnPrev').addEventListener('click', ()=>{
+    curIdx = Math.max(0, curIdx - 1);
+    send({type:'prev'});
+    highlight(curIdx);
+    addLog(`Moved to paragraph ${curIdx+1}`, true);
+  });
+  document.getElementById('btnNext').addEventListener('click', ()=>{
+    curIdx = Math.min(paragraphsKO.length - 1, curIdx + 1);
+    send({type:'next'});
+    highlight(curIdx);
+    addLog(`Moved to paragraph ${curIdx+1}`, true);
+  });
 </script>

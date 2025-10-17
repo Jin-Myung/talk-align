@@ -1,13 +1,15 @@
 import sys, pyaudio, numpy as np, queue, threading, webrtcvad
 from faster_whisper import WhisperModel
 from rapidfuzz import process, fuzz
-import re, signal, time, os, webbrowser
+import re
+import signal
+import time
 from typing import Dict, List
+import webbrowser
 from wsbridge import WSBridge
 
-# ================================
-# Windows 콘솔 UTF-8 fix
-# ================================
+# --- Windows console UTF-8 fix ---
+import os
 if os.name == "nt":
     try:
         import ctypes
@@ -21,7 +23,7 @@ if os.name == "nt":
         pass
 
 # ================================
-# Arguments
+# Args
 # ================================
 if len(sys.argv) < 3:
     print("Usage: python main.py <ko_script.txt> <en_prompt.txt>")
@@ -31,7 +33,7 @@ ko_file = sys.argv[1]
 en_file = sys.argv[2]
 
 # ================================
-# Sentence splitter
+# Sentence splitter (language-agnostic)
 # ================================
 _sent_re = re.compile(r'([^.!?]*[.!?]["”\']?)')
 
@@ -56,12 +58,14 @@ def parse_paragraphs(path: str) -> Dict[int, List[str]]:
         lines = [ln.rstrip() for ln in f]
 
     paras: Dict[int, List[str]] = {}
-    cur_no, cur_buf = None, []
+    cur_no: int = None
+    cur_buf: List[str] = []
 
     def flush():
         nonlocal cur_no, cur_buf
         if cur_no is None:
             return
+        # skip if already exists (avoid duplication)
         if cur_no in paras:
             return
         paragraph_text = ' '.join([s for s in cur_buf if s.strip()])
@@ -76,32 +80,44 @@ def parse_paragraphs(path: str) -> Dict[int, List[str]]:
             cur_no = int(m.group(1))
             tail = m.group(2) or ""
             cur_buf = [tail] if tail.strip() else []
-        elif cur_no is not None:
-            cur_buf.append(ln)
+        else:
+            if cur_no is not None:
+                cur_buf.append(ln)
 
     flush()
     return paras
 
 # ================================
-# Whisper + Audio + VAD
+# Initialize model / audio / VAD
 # ================================
 model = WhisperModel("small", device="cpu", compute_type="int8")
+
 RATE = 16000
-FRAME_DURATION = 30
+FRAME_DURATION = 30  # ms
 FRAME_SIZE = int(RATE * FRAME_DURATION / 1000)
 FORMAT = pyaudio.paInt16
+
 vad = webrtcvad.Vad(1)
 
 rt_audio_q = queue.Queue()
 stop_event = threading.Event()
-stream = None
 
-def should_stop() -> bool:
+def should_stop():
     return stop_event.is_set()
+
+# ================================
+# Thresholds
+# ================================
+MIN_UTTER_TEXT_LEN_FOR_MATCH = 6
+MIN_UTTER_LEN_IN_MS_FOR_MATCH = 1000
+MAX_UTTER_LEN_IN_MS = 10000
+SCRIPT_MATCH_THRESHOLD = 70
 
 # ================================
 # Audio capture thread
 # ================================
+stream = None
+
 def audio_capture():
     global stream
     pa = pyaudio.PyAudio()
@@ -117,10 +133,13 @@ def audio_capture():
             stream.close()
         except Exception:
             pass
-        pa.terminate()
+        try:
+            pa.terminate()
+        except Exception:
+            pass
 
 # ================================
-# Text utils
+# Helper
 # ================================
 _sig_re = re.compile(r"[A-Za-z0-9\u3131-\u318E\uAC00-\uD7A3]")
 def significant_len(s: str) -> int:
@@ -130,91 +149,111 @@ def clamp_idx(i: int) -> int:
     return max(0, min(TOTAL - 1, i))
 
 # ================================
-# Thresholds
-# ================================
-MIN_UTTER_TEXT_LEN_FOR_MATCH = 6
-MIN_UTTER_LEN_IN_MS_FOR_MATCH = 1000
-MAX_UTTER_LEN_IN_MS = 10000
-SCRIPT_MATCH_THRESHOLD = 70
-
-# ================================
-# Process utterance (STT + alignment)
+# Process utterance
 # ================================
 def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
-    audio = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
-    utter_ms = int(len(audio) / RATE * 1000)
-    segments, _ = model.transcribe(audio, language="ko", beam_size=1)
+    normalized = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
+    utter_ms = int(len(normalized) / RATE * 1000)
+    segments, _ = model.transcribe(normalized, language="ko", beam_size=1)
     raw_text = "".join(seg.text for seg in segments).strip()
 
     if not raw_text:
         return pending_text, pending_ms, cur_idx
 
-    combined_text = (pending_text + " " + raw_text).strip() if pending_text else raw_text
+    combined = (pending_text + " " + raw_text).strip() if pending_text else raw_text
     combined_ms = pending_ms + utter_ms
 
-    if significant_len(combined_text) < MIN_UTTER_TEXT_LEN_FOR_MATCH or combined_ms < MIN_UTTER_LEN_IN_MS_FOR_MATCH:
-        ws.send({"type": "recognize", "text": combined_text})
-        return combined_text, combined_ms, cur_idx
+    if significant_len(combined) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
+        print(f"\nRecognized: {combined}")
+        ws.send({"type": "recognize", "text": combined})
 
-    ws.send({"type": "recognize", "text": combined_text})
+        start = clamp_idx(cur_idx - 1)
+        end = clamp_idx(cur_idx + 4)
+        search_range = aligned_ko[start:end]
 
-    # 문단 매칭
-    start = clamp_idx(cur_idx - 1)
-    end = clamp_idx(cur_idx + 4)
-    search_range = aligned_ko[start:end]
+        if search_range:
+            match, score, idx_rel = process.extractOne(combined, search_range, scorer=fuzz.partial_ratio)
+            idx = start + idx_rel
 
-    if not search_range:
-        return "", 0, cur_idx
+            if score >= SCRIPT_MATCH_THRESHOLD:
+                cur_idx = idx
+                tag = aligned_tag[idx]
+                en_line = aligned_en[idx]
+                next_line = aligned_en[idx + 1] if idx + 1 < len(aligned_en) else ""
+                print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
+                ws.send({
+                    "type": "match",
+                    "idx": cur_idx,
+                    "tag": tag,
+                    "line": en_line,
+                    "ko": aligned_ko[idx],
+                    "score": round(score, 1),
+                    "next": next_line,
+                })
+            else:
+                print(f"No matching script (similarity {score:.3f}%)")
+                ws.send({"type": "info", "msg": f"No match ({round(score,1)}%)"})
+        else:
+            ws.send({"type": "info", "msg": "No matching script (end of window)"})
 
-    match, score, idx_rel = process.extractOne(
-        combined_text, search_range, scorer=fuzz.partial_ratio
-    )
-    idx = start + idx_rel
-
-    if score >= SCRIPT_MATCH_THRESHOLD:
-        cur_idx = idx
-        tag = aligned_tag[idx]
-        en_line = aligned_en[idx]
-        para_idx = aligned_para_idx[idx]
-
-        # 문단 전체 전송
-        cur_para = paras_en[para_idx]
-        next_para = paras_en[para_idx + 1] if para_idx + 1 < len(paras_en) else ""
-        ws.send({"type": "para_match", "para_idx": para_idx, "cur": cur_para, "next": next_para})
-        print(f"[{tag}] {en_line} ({score:.1f}%)")
+        pending_text, pending_ms = "", 0
     else:
-        ws.send({"type": "info", "msg": f"No match ({score:.1f}%)"})
-        print(f"No matching script ({score:.1f}%)")
+        pending_text, pending_ms = combined, combined_ms
+        print(f"\nBuffering: chars={significant_len(pending_text)}, ms={pending_ms}")
 
-    return "", 0, cur_idx
+    return pending_text, pending_ms, cur_idx
 
 # ================================
-# VAD loop
+# VAD + alignment loop
 # ================================
-def vad_loop(ws):
+def vad_loop(ws: WSBridge):
     cur_idx = 0
+    utter = []
+    in_utter = False
     pending_text = ""
     pending_ms = 0
-    in_utter = False
-    utter = []
-    speech_count = 0
-    silence_count = 0
+
     speech_start_frames = 2
     silence_end_frames = 6
+    speech_count = 0
+    silence_count = 0
 
-    # 첫 문단 전송
-    ws.send({
-        "type": "para_match",
-        "para_idx": 0,
-        "cur": paras_en[0],
-        "next": paras_en[1] if len(paras_en) > 1 else ""
-    })
+    # Send initial paragraph set to operator
+    ws.send({"type": "init_paras", "ko": aligned_ko_paras, "en": aligned_en_paras})
+
+    if aligned_en:
+        tag = aligned_tag[cur_idx]
+        cur = aligned_en[cur_idx]
+        nxt = aligned_en[cur_idx + 1] if cur_idx + 1 < len(aligned_en) else ""
+        ws.send({"type": "para_match", "para_idx": cur_para_idx(cur_idx), "cur": cur, "next": nxt})
 
     while not should_stop():
+        cmd = ws.get_cmd_nowait()
+        if cmd:
+            t = cmd.get("type")
+            if t == "prev":
+                cur_idx = max(0, cur_idx - para_step(cur_idx))
+            elif t == "next":
+                cur_idx = min(TOTAL - 1, cur_idx + para_step(cur_idx))
+            elif t == "goto":
+                cur_idx = clamp_idx(int(cmd.get("idx", 0)))
+
+            # broadcast paragraph update
+            ws.send({
+                "type": "para_match",
+                "para_idx": cur_para_idx(cur_idx),
+                "cur": aligned_en_paras[cur_para_idx(cur_idx)],
+                "next": aligned_en_paras[cur_para_idx(cur_idx) + 1]
+                if cur_para_idx(cur_idx) + 1 < len(aligned_en_paras)
+                else "",
+            })
+            continue
+
         try:
             frame = rt_audio_q.get(timeout=0.1)
         except queue.Empty:
             continue
+
         if len(frame) < FRAME_SIZE * 2:
             continue
 
@@ -234,27 +273,45 @@ def vad_loop(ws):
             if is_speech:
                 silence_count = 0
                 if len(utter) * FRAME_DURATION >= MAX_UTTER_LEN_IN_MS:
-                    pending_text, pending_ms, cur_idx = process_utterance(ws, utter, pending_text, pending_ms, cur_idx)
+                    pending_text, pending_ms, cur_idx = process_utterance(
+                        ws, utter, pending_text, pending_ms, cur_idx
+                    )
                     in_utter = False
-                    utter = []
                     speech_count = 0
+                    utter = []
             else:
                 silence_count += 1
                 if silence_count >= silence_end_frames:
-                    pending_text, pending_ms, cur_idx = process_utterance(ws, utter, pending_text, pending_ms, cur_idx)
+                    pending_text, pending_ms, cur_idx = process_utterance(
+                        ws, utter, pending_text, pending_ms, cur_idx
+                    )
                     in_utter = False
-                    utter = []
                     speech_count = 0
                     silence_count = 0
+                    utter = []
 
 # ================================
-# Graceful shutdown
+# Helpers for paragraph tracking
+# ================================
+def cur_para_idx(line_idx: int) -> int:
+    for p_i, (start, end) in enumerate(para_ranges):
+        if start <= line_idx <= end:
+            return p_i
+    return 0
+
+def para_step(line_idx: int) -> int:
+    p_i = cur_para_idx(line_idx)
+    start, end = para_ranges[p_i]
+    return end - start + 1
+
+# ================================
+# Shutdown handling
 # ================================
 def request_shutdown(*_):
     print("\nShutting down...")
     stop_event.set()
     try:
-        if stream:
+        if stream is not None:
             stream.stop_stream()
             stream.close()
     except Exception:
@@ -281,56 +338,63 @@ if hasattr(signal, "SIGBREAK"):
 try:
     ws = WSBridge("ws://127.0.0.1:8000/ws")
 except ConnectionRefusedError:
-    print("Error: Start wsbridge server first (`uvicorn server:app --host 0.0.0.0 --port 8000`)")
+    print("Error: Start wsbridge server first `uvicorn server:app --host 0.0.0.0 --port 8000`")
     sys.exit(1)
 
 operator_url = "http://127.0.0.1:8000/public/operator.html"
 audience_url = "http://127.0.0.1:8000/public/audience.html"
 
-print("Opening browser windows...")
+print("Opening URL for operator and audience:\n")
+print(f"  - {operator_url}")
+print(f"  - {audience_url}\n")
 webbrowser.open(operator_url)
 webbrowser.open(audience_url)
 
 time.sleep(2)
 
-# --- Load and align paragraphs ---
+print("Loading script and prompt files...")
+
+# --- Parse paragraphs ---
 ko_paras = parse_paragraphs(ko_file)
 en_paras = parse_paragraphs(en_file)
 
 if not ko_paras or not en_paras:
-    print("Missing paragraphs in script files.")
+    print("Error: invalid KO/EN paragraph structure")
     sys.exit(1)
 
-para_ids = sorted(set(ko_paras.keys()) & set(en_paras.keys()))
-if not para_ids:
-    print("No common paragraph numbers between KO/EN files.")
+common_ids = sorted(set(ko_paras.keys()) & set(en_paras.keys()))
+if not common_ids:
+    print("No common paragraph numbers.")
     sys.exit(1)
 
-aligned_ko, aligned_en, aligned_tag, aligned_para_idx = [], [], [], []
-paras_ko, paras_en = [], []
-for i, pid in enumerate(para_ids):
-    ko_sent = " ".join(ko_paras[pid])
-    en_sent = " ".join(en_paras[pid])
-    paras_ko.append(ko_sent)
-    paras_en.append(en_sent)
-    for j, (k, e) in enumerate(zip(ko_paras[pid], en_paras[pid])):
-        aligned_ko.append(k)
-        aligned_en.append(e)
-        aligned_tag.append(f"{pid}.{j+1}")
-        aligned_para_idx.append(i)
+aligned_ko, aligned_en, aligned_tag = [], [], []
+aligned_ko_paras, aligned_en_paras, para_ranges = [], [], []
+line_counter = 0
+
+for pid in common_ids:
+    ko_sents, en_sents = ko_paras[pid], en_paras[pid]
+    n = min(len(ko_sents), len(en_sents))
+    start = line_counter
+    for i in range(n):
+        aligned_ko.append(ko_sents[i])
+        aligned_en.append(en_sents[i])
+        aligned_tag.append(f"{pid}.{i+1}")
+        line_counter += 1
+    end = line_counter - 1
+    para_ranges.append((start, end))
+    aligned_ko_paras.append(" ".join(ko_sents))
+    aligned_en_paras.append(" ".join(en_sents))
 
 TOTAL = len(aligned_ko)
-print(f"Loaded {len(para_ids)} paragraphs ({TOTAL} aligned sentences)")
-
-# 초기 문단 전체 전송 (operator UI 구성용)
-ws.send({"type": "init_paras", "ko": paras_ko, "en": paras_en})
+print(f"Loaded {len(common_ids)} paragraphs ({TOTAL} total sentences)")
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
+
 t1.start()
 t2.start()
-
 print("Ready. Press Ctrl+C to stop.")
+
 try:
     while not should_stop():
         t1.join(timeout=0.5)
@@ -342,4 +406,4 @@ except KeyboardInterrupt:
 
 for t in (t1, t2):
     t.join(timeout=2.0)
-print("Shutdown complete.")
+print("Shutdown complete")
