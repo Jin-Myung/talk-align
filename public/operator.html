@@ -1,43 +1,178 @@
 <!doctype html><meta charset="utf-8">
 <title>Operator</title>
 <style>
-  body{font:16px/1.5 system-ui, sans-serif; margin:20px}
-  .cur{font-weight:700}
-  .next{opacity:.6;margin-top:6px}
-  button{font:16px;margin-right:8px;padding:8px 14px}
-  #log{margin-top:12px;background:#f7f7f7;padding:8px;max-height:40vh;overflow:auto;white-space:pre-wrap}
-</style>
-<h3>Operator</h3>
-<div class="cur" id="cur"></div>
-<div class="next" id="next"></div>
-<div style="margin-top:12px">
-  <button onclick="send({type:'prev'})">▲ Up</button>
-  <button onclick="send({type:'next'})">▼ Down</button>
-</div>
-<div id="log"></div>
-<script>
-  const log  = document.getElementById('log');
-  const cur  = document.getElementById('cur');
-  const next = document.getElementById('next');
-  const ws   = new WebSocket(`ws://${location.host}/ws`);
+  body {
+    font: 16px/1.5 system-ui, sans-serif;
+    margin: 0;
+    background: #fafafa;
+    color: #222;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
 
-  function send(o){ ws.send(JSON.stringify(o)); }
-  function append(s){ log.textContent += s + "\n"; log.scrollTop = log.scrollHeight; }
+  header {
+    background: #333;
+    color: #fff;
+    padding: 10px 16px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* 좌우 패널 */
+  .panel {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    border-right: 1px solid #ddd;
+  }
+  .panel:last-child {
+    border-right: none;
+  }
+
+  .para {
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    transition: background 0.25s;
+  }
+  .para.highlight {
+    background: #fff8b3; /* 현재 문단 하이라이트 */
+  }
+
+  .buttons {
+    display: flex;
+    justify-content: center;
+    padding: 10px;
+    background: #eee;
+    border-top: 1px solid #ccc;
+  }
+  button {
+    font-size: 16px;
+    padding: 8px 14px;
+    margin: 0 10px;
+    cursor: pointer;
+  }
+
+  #status {
+    background: #f7f7f7;
+    padding: 10px 16px;
+    border-top: 1px solid #ddd;
+    font-family: monospace;
+    white-space: pre-wrap;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  .status-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .rec-line {
+    color: #333;
+    margin: 2px 0;
+  }
+  .rec-prev { color: #999; }
+  .rec-cur { color: #000; font-weight: 600; }
+</style>
+
+<header>Operator Console</header>
+
+<main>
+  <!-- Left: Korean script -->
+  <div id="koPanel" class="panel"></div>
+
+  <!-- Right: English prompt -->
+  <div id="enPanel" class="panel"></div>
+</main>
+
+<div class="buttons">
+  <button onclick="send({type:'prev'})">▲ Previous Paragraph</button>
+  <button onclick="send({type:'next'})">▼ Next Paragraph</button>
+</div>
+
+<div id="status">
+  <div class="status-title">Recognition:</div>
+  <div id="recPrev" class="rec-line rec-prev"></div>
+  <div id="recCur"  class="rec-line rec-cur"></div>
+</div>
+
+<script>
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const koPanel = document.getElementById('koPanel');
+  const enPanel = document.getElementById('enPanel');
+  const recPrev = document.getElementById('recPrev');
+  const recCur  = document.getElementById('recCur');
+
+  let paragraphsKO = [];
+  let paragraphsEN = [];
+  let curIdx = -1;
+  let lastRecognized = "";
+
+  /* --- WebSocket interaction --- */
+  function send(o){
+    ws.send(JSON.stringify(o));
+  }
 
   ws.onmessage = (e) => {
     try{
-      const d = JSON.parse(e.data);
-      if(d.type === "recognize"){
-        append("Recognized (KO): " + d.text);
-      }else if(d.type === "match"){
-        // show tag + English line
-        const tag = d.tag ? `[${d.tag}] ` : "";
-        cur.textContent  = `${tag}${d.line}${d.score ? " ("+d.score+"%)" : ""}`;
-        next.textContent = d.next || "";
-        append(`Match: ${tag}${d.line}${d.score ? " ("+d.score+"%)" : ""}`);
-      }else if(d.type === "info"){
-        append(d.msg || "");
+      const d = JSON.parse(e.data || '{}');
+      if (d.type === 'init_paras'){        // 초기 문단 데이터
+        paragraphsKO = d.ko || [];
+        paragraphsEN = d.en || [];
+        renderPanels();
+      }
+      else if (d.type === 'para_match'){   // 현재 문단 인식 매칭
+        highlight(d.para_idx || 0);
+      }
+      else if (d.type === 'recognize'){    // 인식된 문장
+        updateRecognition(d.text || "");
       }
     }catch(_){}
   };
+
+  /* --- UI 업데이트 --- */
+  function renderPanels(){
+    koPanel.innerHTML = '';
+    enPanel.innerHTML = '';
+    for (let i=0; i<paragraphsKO.length; i++){
+      const p1 = document.createElement('div');
+      p1.className = 'para';
+      p1.textContent = paragraphsKO[i];
+      koPanel.appendChild(p1);
+
+      const p2 = document.createElement('div');
+      p2.className = 'para';
+      p2.textContent = paragraphsEN[i];
+      enPanel.appendChild(p2);
+    }
+  }
+
+  function highlight(idx){
+    curIdx = idx;
+    const allKO = koPanel.querySelectorAll('.para');
+    const allEN = enPanel.querySelectorAll('.para');
+    allKO.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
+    allEN.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
+
+    // 자동 스크롤: 중앙 근처로
+    const activeKO = allKO[idx];
+    const activeEN = allEN[idx];
+    if (activeKO) activeKO.scrollIntoView({behavior:'smooth', block:'center'});
+    if (activeEN) activeEN.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+
+  function updateRecognition(text){
+    if (!text) return;
+    recPrev.textContent = lastRecognized;
+    recCur.textContent  = text;
+    lastRecognized = text;
+  }
 </script>
