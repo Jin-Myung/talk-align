@@ -38,8 +38,21 @@
     margin-bottom: 10px;
     border-radius: 6px;
     transition: background 0.25s;
+    display: flex;
+    align-items: flex-start;
   }
-  .para.highlight { background: #fff8b3; }
+
+  .pnum {
+    display: inline-block;
+    min-width: 2em;
+    margin-right: 6px;
+    font-weight: 700;
+    color: #777;
+  }
+
+  .para.highlight {
+    background: #fff8b3;
+  }
 
   .buttons {
     display: flex;
@@ -97,7 +110,7 @@
   let paragraphsKO = [];
   let paragraphsEN = [];
   let curIdx = 0;
-  let lastMatchedIdx = -1;   // ✅ 최근 highlight된 문단 번호 저장
+  let lastMatchedIdx = -1;
 
   function send(o){ ws.send(JSON.stringify(o)); }
 
@@ -113,7 +126,7 @@
       }
       else if (d.type === 'para_match') {
         const newIdx = d.para_idx || 0;
-        if (newIdx !== lastMatchedIdx) {        // ✅ 동일 문단이면 로그 생략
+        if (newIdx !== lastMatchedIdx) {
           highlight(newIdx);
           addLog(`Matched paragraph ${newIdx + 1}`, true);
           lastMatchedIdx = newIdx;
@@ -128,18 +141,21 @@
     } catch(_){}
   };
 
+  // ✅ 문단 번호 표시
   function renderPanels(){
     koPanel.innerHTML = '';
     enPanel.innerHTML = '';
     for (let i = 0; i < paragraphsKO.length; i++){
       const p1 = document.createElement('div');
       p1.className = 'para';
-      p1.textContent = paragraphsKO[i];
+      p1.id = `ko-p${i}`;
+      p1.innerHTML = `<span class="pnum">${i+1}.</span><span>${paragraphsKO[i]}</span>`;
       koPanel.appendChild(p1);
 
       const p2 = document.createElement('div');
       p2.className = 'para';
-      p2.textContent = paragraphsEN[i];
+      p2.id = `en-p${i}`;
+      p2.innerHTML = `<span class="pnum">${i+1}.</span><span>${paragraphsEN[i]}</span>`;
       enPanel.appendChild(p2);
     }
   }
@@ -150,8 +166,9 @@
     const allEN = enPanel.querySelectorAll('.para');
     allKO.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
     allEN.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
-    const activeKO = allKO[idx];
-    const activeEN = allEN[idx];
+
+    const activeKO = document.getElementById(`ko-p${idx}`);
+    const activeEN = document.getElementById(`en-p${idx}`);
     if (activeKO) activeKO.scrollIntoView({behavior:'smooth', block:'center'});
     if (activeEN) activeEN.scrollIntoView({behavior:'smooth', block:'center'});
   }
