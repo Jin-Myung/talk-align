@@ -2,7 +2,7 @@
 <title>Operator</title>
 <style>
   body {
-    font: 16px/1.5 system-ui, sans-serif;
+    font: 16px/1.4 system-ui, sans-serif;
     margin: 0;
     background: #fafafa;
     color: #222;
@@ -25,7 +25,6 @@
     overflow: hidden;
   }
 
-  /* 좌우 패널 */
   .panel {
     flex: 1;
     padding: 16px;
@@ -43,7 +42,7 @@
     transition: background 0.25s;
   }
   .para.highlight {
-    background: #fff8b3; /* 현재 문단 하이라이트 */
+    background: #fff8b3;
   }
 
   .buttons {
@@ -54,42 +53,43 @@
     border-top: 1px solid #ccc;
   }
   button {
-    font-size: 16px;
+    font-size: 15px;
     padding: 8px 14px;
     margin: 0 10px;
     cursor: pointer;
   }
 
+  /* 인식 결과 영역 */
   #status {
-    background: #f7f7f7;
-    padding: 10px 16px;
-    border-top: 1px solid #ddd;
+    background: #f5f5f5;
+    padding: 8px 12px;
+    border-top: 1px solid #ccc;
     font-family: monospace;
-    white-space: pre-wrap;
-    max-height: 120px;
+    font-size: 13px;
+    line-height: 1.3;       /* 줄 간격 축소 */
+    max-height: 150px;
     overflow-y: auto;
+    white-space: pre-wrap;
   }
 
   .status-title {
-    font-weight: 600;
+    font-weight: 700;
     margin-bottom: 4px;
   }
 
-  .rec-line {
-    color: #333;
+  .log-line {
     margin: 2px 0;
   }
-  .rec-prev { color: #999; }
-  .rec-cur { color: #000; font-weight: 600; }
+  .log-time { color: #999; margin-right: 6px; }
+  .log-text { color: #222; }
+  .log-match { color: #007a00; font-weight: 600; }
+  .log-nomatch { color: #a33; font-weight: 600; }
 </style>
 
 <header>Operator Console</header>
 
 <main>
-  <!-- Left: Korean script -->
   <div id="koPanel" class="panel"></div>
-
-  <!-- Right: English prompt -->
   <div id="enPanel" class="panel"></div>
 </main>
 
@@ -99,46 +99,45 @@
 </div>
 
 <div id="status">
-  <div class="status-title">Recognition:</div>
-  <div id="recPrev" class="rec-line rec-prev"></div>
-  <div id="recCur"  class="rec-line rec-cur"></div>
+  <div class="status-title">Recognition Log:</div>
+  <div id="log"></div>
 </div>
 
 <script>
   const ws = new WebSocket(`ws://${location.host}/ws`);
   const koPanel = document.getElementById('koPanel');
   const enPanel = document.getElementById('enPanel');
-  const recPrev = document.getElementById('recPrev');
-  const recCur  = document.getElementById('recCur');
+  const log = document.getElementById('log');
 
   let paragraphsKO = [];
   let paragraphsEN = [];
   let curIdx = -1;
-  let lastRecognized = "";
 
-  /* --- WebSocket interaction --- */
-  function send(o){
-    ws.send(JSON.stringify(o));
-  }
+  /* --- WebSocket --- */
+  function send(o){ ws.send(JSON.stringify(o)); }
 
   ws.onmessage = (e) => {
     try{
       const d = JSON.parse(e.data || '{}');
-      if (d.type === 'init_paras'){        // 초기 문단 데이터
+      if (d.type === 'init_paras'){
         paragraphsKO = d.ko || [];
         paragraphsEN = d.en || [];
         renderPanels();
       }
-      else if (d.type === 'para_match'){   // 현재 문단 인식 매칭
+      else if (d.type === 'para_match'){
         highlight(d.para_idx || 0);
+        addLog(`Matched paragraph ${d.para_idx+1}`, true);
       }
-      else if (d.type === 'recognize'){    // 인식된 문장
-        updateRecognition(d.text || "");
+      else if (d.type === 'recognize'){
+        addLog(`Recognized: ${d.text}`, false);
+      }
+      else if (d.type === 'info'){
+        addLog(d.msg || 'Info message', false, true);
       }
     }catch(_){}
   };
 
-  /* --- UI 업데이트 --- */
+  /* --- UI 구성 --- */
   function renderPanels(){
     koPanel.innerHTML = '';
     enPanel.innerHTML = '';
@@ -162,17 +161,31 @@
     allKO.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
     allEN.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
 
-    // 자동 스크롤: 중앙 근처로
     const activeKO = allKO[idx];
     const activeEN = allEN[idx];
     if (activeKO) activeKO.scrollIntoView({behavior:'smooth', block:'center'});
     if (activeEN) activeEN.scrollIntoView({behavior:'smooth', block:'center'});
   }
 
-  function updateRecognition(text){
-    if (!text) return;
-    recPrev.textContent = lastRecognized;
-    recCur.textContent  = text;
-    lastRecognized = text;
+  /* --- 로그 관리 --- */
+  function addLog(msg, isMatch=false, isInfo=false){
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    const t = document.createElement('span');
+    t.className = 'log-time';
+    t.textContent = `[${new Date().toLocaleTimeString()}] `;
+    const m = document.createElement('span');
+    m.className = 'log-text';
+    if (isMatch) m.classList.add('log-match');
+    if (isInfo) m.classList.add('log-nomatch');
+    m.textContent = msg;
+    line.appendChild(t);
+    line.appendChild(m);
+    log.appendChild(line);
+
+    // 최근 5개까지만 유지
+    const lines = log.querySelectorAll('.log-line');
+    if (lines.length > 5) log.removeChild(lines[0]);
+    log.scrollTop = log.scrollHeight;
   }
 </script>
