@@ -1,14 +1,15 @@
 import sys, pyaudio, numpy as np, queue, threading, webrtcvad
 from faster_whisper import WhisperModel
 from rapidfuzz import process, fuzz
-import signal, re
+import re
+import signal
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import webbrowser
 from wsbridge import WSBridge
 
 # ================================
-# Load script file
+# Args
 # ================================
 if len(sys.argv) < 3:
     print("Usage: python main.py <ko_script.txt> <en_prompt.txt>")
@@ -84,7 +85,7 @@ def parse_paragraphs(path: str) -> Dict[int, List[str]]:
 model = WhisperModel("small", device="cpu", compute_type="int8")
 
 RATE = 16000
-FRAME_DURATION = 30  # 30 ms
+FRAME_DURATION = 30  # ms
 FRAME_SIZE = int(RATE * FRAME_DURATION / 1000)  # 480 samples
 FORMAT = pyaudio.paInt16
 
@@ -305,10 +306,10 @@ except Exception as e:
     print("WebSocket connection error: ", e)
     sys.exit(1)
 
-operator_url = "http://0.0.0.0:8000/public/operator.html"
-audience_url = "http://0.0.0.0:8000/public/audience.html"
+operator_url = "http://127.0.0.1:8000/public/operator.html"
+audience_url = "http://127.0.0.1:8000/public/audience.html"
 
-print(f"Opening URL for operator and audience:\n")
+print("Opening URL for operator and audience:\n")
 print(f"  - {operator_url}")
 print(f"  - {audience_url}\n")
 
@@ -317,7 +318,7 @@ webbrowser.open(audience_url)
 
 time.sleep(2)  # wait for WS to stabilize
 
-print(f"Loading script and promot files:")
+print("Loading script and prompt files:")
 
 # Load KO & EN paragraphs
 ko_paras = parse_paragraphs(ko_file)
@@ -330,7 +331,7 @@ if not en_paras:
     print("English prompt has no paragraphs starting with '<n>.'")
     sys.exit(1)
 
-# Build flat alignment list by paragraph order intersection
+# Build flat alignment list by paragraph intersection
 para_ids = sorted(set(ko_paras.keys()) & set(en_paras.keys()))
 if not para_ids:
     print("No common paragraph numbers between KO/EN files.")
@@ -345,7 +346,6 @@ for p in para_ids:
     en_sents = en_paras[p]
     if len(ko_sents) != len(en_sents):
         print(f"Warning: sentence count mismatch in paragraph {p}: KO={len(ko_sents)} vs EN={len(en_sents)}")
-        # choose min length to stay safe
     n = min(len(ko_sents), len(en_sents))
     for i in range(n):
         aligned_ko.append(ko_sents[i])
