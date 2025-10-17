@@ -99,7 +99,7 @@ FORMAT = pyaudio.paInt16
 
 vad = webrtcvad.Vad(1)
 
-rt_audio_q = queue.Queue()
+rt_audio_q = queue.Queue(maxsize=50)
 stop_event = threading.Event()
 
 def should_stop():
@@ -235,8 +235,6 @@ def vad_loop(ws: WSBridge):
                 cur_idx = max(0, cur_idx - para_step(cur_idx))
             elif t == "next":
                 cur_idx = min(TOTAL - 1, cur_idx + para_step(cur_idx))
-            elif t == "goto":
-                cur_idx = clamp_idx(int(cmd.get("idx", 0)))
 
             # broadcast paragraph update
             ws.send({
@@ -247,7 +245,6 @@ def vad_loop(ws: WSBridge):
                 if cur_para_idx(cur_idx) + 1 < len(aligned_en_paras)
                 else "",
             })
-            continue
 
         try:
             frame = rt_audio_q.get(timeout=0.1)
