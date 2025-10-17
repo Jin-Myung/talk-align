@@ -1,21 +1,37 @@
 <!doctype html><meta charset="utf-8">
 <title>Audience</title>
 <style>
-    body{background:#000;color:#fff;font:48px/1.35 system-ui, sans-serif;margin:40px}
-    .cur{margin-bottom:.4em}
-    .next{opacity:.45;font-size:.75em}
+    body {
+        background: #000;
+        color: #fff;
+        font: 40px/1.5 system-ui, sans-serif;
+        margin: 40px;
+    }
+    .cur {
+        color: #ffeb3b;
+        font-weight: 600;
+        margin-bottom: 1.5em;
+        white-space: normal;
+    }
+    .next {
+        opacity: 0.4;
+        font-size: 0.85em;
+        white-space: normal;
+    }
 </style>
+
 <div id="cur" class="cur"></div>
 <div id="next" class="next"></div>
+
 <script>
     const ws = new WebSocket(`ws://${location.host}/ws`);
     ws.onmessage = (e) => {
-        try{
+        try {
             const d = JSON.parse(e.data);
-            if(d.type === "match"){
-                document.getElementById('cur').textContent  = d.line || "";
-                document.getElementById('next').textContent = d.next || "";
+            if (d.type === "para_match") {
+                document.getElementById("cur").textContent  = d.cur || "";
+                document.getElementById("next").textContent = d.next || "";
             }
-        }catch(_){}
+        } catch(_) {}
     };
 </script>
