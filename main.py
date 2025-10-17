@@ -92,7 +92,11 @@ FORMAT = pyaudio.paInt16
 vad = webrtcvad.Vad(1)   # VAD sensitivity (0=permissive, 3=aggressive)
 
 rt_audio_q = queue.Queue()
-running = True
+
+# ---- graceful shutdown event ----
+stop_event = threading.Event()
+def should_stop() -> bool:
+    return stop_event.is_set()
 
 # ================================
 # Utterance length thresholds for script matching
@@ -109,18 +113,28 @@ SCRIPT_MATCH_THRESHOLD = 70  # require at least 70% similarity
 # ================================
 # Audio capture thread
 # ================================
+stream = None
+
 def audio_capture():
+    global stream
     pa = pyaudio.PyAudio()
     stream = pa.open(format=FORMAT, channels=1, rate=RATE,
                      input=True, frames_per_buffer=FRAME_SIZE)
     try:
-        while running:
-            frame = stream.read(FRAME_SIZE)
+        while not should_stop():
+            # in case of overflow, skip frame
+            frame = stream.read(FRAME_SIZE, exception_on_overflow=False)
             rt_audio_q.put(frame)
     finally:
-        stream.stop_stream()
-        stream.close()
-        pa.terminate()
+        try:
+            stream.stop_stream()
+            stream.close()
+        except Exception:
+            pass
+        try:
+            pa.terminate()
+        except Exception:
+            pass
 
 # ================================
 # Keep letters/digits/Hangul when counting significant chars
@@ -138,7 +152,7 @@ def clamp_idx(i: int) -> int:
 # ================================
 # Process utterance: STT + script alignment
 # ================================
-def process_utterance(utter, pending_utter_text, pending_utter_len, current_line_in_script):
+def process_utterance(ws, utter, pending_utter_text, pending_utter_len, current_line_in_script):
     normalized_utter = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
     utter_ms = int(len(normalized_utter) / RATE * 1000)
 
@@ -150,7 +164,6 @@ def process_utterance(utter, pending_utter_text, pending_utter_len, current_line
         combined_ms = pending_utter_len + utter_ms
 
         if significant_len(combined_text) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
-
             print(f"\nRecognized: {combined_text}")
             ws.send({"type": "recognize", "text": combined_text})
 
@@ -202,7 +215,7 @@ def vad_loop(ws: WSBridge):
     pending_utter_len = 0  # in ms
 
     # VAD hangover settings
-    speech_start_frames = 2  # 2 * FRAME_DURATION = 90ms to confirm speech start
+    speech_start_frames = 2  # 2 * FRAME_DURATION = 60ms to confirm speech start
     silence_end_frames = 6   # 6 * FRAME_DURATION = 180ms to confirm end
     speech_count = 0
     silence_count = 0
@@ -215,7 +228,8 @@ def vad_loop(ws: WSBridge):
     else:
         ws.send({"type": "info", "msg": "Script is empty."})
 
-    while running:
+    while not should_stop():
+        # commands from operator UI
         cmd = ws.get_cmd_nowait()
         if cmd:
             t = cmd.get("type")
@@ -239,6 +253,9 @@ def vad_loop(ws: WSBridge):
         except queue.Empty:
             continue
 
+        if should_stop():
+            break
+
         if len(frame) < FRAME_SIZE * 2:
             continue
 
@@ -261,18 +278,17 @@ def vad_loop(ws: WSBridge):
                 if len(utter) * FRAME_DURATION >= MAX_UTTER_LEN_IN_MS:
                     # Force process if utterance too long
                     pending_utter_text, pending_utter_len, current_line_in_script = process_utterance(
-                        utter, pending_utter_text, pending_utter_len, current_line_in_script
+                        ws, utter, pending_utter_text, pending_utter_len, current_line_in_script
                     )
                     # reset for next utterance
                     in_utter = False
                     speech_count = 0
                     utter = []
-
             else:
                 silence_count += 1
                 if silence_count >= silence_end_frames:
                     pending_utter_text, pending_utter_len, current_line_in_script = process_utterance(
-                        utter, pending_utter_text, pending_utter_len, current_line_in_script
+                        ws, utter, pending_utter_text, pending_utter_len, current_line_in_script
                     )
                     # reset for next utterance
                     in_utter = False
@@ -281,18 +297,35 @@ def vad_loop(ws: WSBridge):
                     utter = []
 
 # ================================
-# Graceful shutdown
+# Signal handling / graceful shutdown
 # ================================
-def signal_handler(sig, frame):
-    global running, ws
+def request_shutdown(*_):
     print("\nShutting down...")
-    running = False
+    stop_event.set()
+    try:
+        if stream is not None:
+            stream.stop_stream(); stream.close()
+    except Exception:
+        pass
+    try:
+        rt_audio_q.put_nowait(b"")
+    except Exception:
+        pass
     try:
         ws.close()
     except Exception:
         pass
 
-signal.signal(signal.SIGINT, signal_handler)
+for sig in (signal.SIGINT, signal.SIGTERM):
+    try:
+        signal.signal(sig, request_shutdown)
+    except Exception:
+        pass
+if hasattr(signal, "SIGBREAK"):
+    try:
+        signal.signal(signal.SIGBREAK, request_shutdown)
+    except Exception:
+        pass
 
 # ================================
 # Run
@@ -366,6 +399,16 @@ t1.start()
 t2.start()
 print(f"Ready. KO={ko_file}, EN={en_file}. Total aligned sentences: {TOTAL}. Press Ctrl+C to stop.")
 
-t1.join()
-t2.join()
+try:
+    while not should_stop():
+        t1.join(timeout=0.5)
+        t2.join(timeout=0.5)
+        if not t1.is_alive() and not t2.is_alive():
+            break
+except KeyboardInterrupt:
+    request_shutdown()
+
+# final join
+for t in (t1, t2):
+    t.join(timeout=2.0)
 print("Shutdown complete")
