@@ -1,43 +1,210 @@
 <!doctype html><meta charset="utf-8">
 <title>Operator</title>
 <style>
-  body{font:16px/1.5 system-ui, sans-serif; margin:20px}
-  .cur{font-weight:700}
-  .next{opacity:.6;margin-top:6px}
-  button{font:16px;margin-right:8px;padding:8px 14px}
-  #log{margin-top:12px;background:#f7f7f7;padding:8px;max-height:40vh;overflow:auto;white-space:pre-wrap}
+  body {
+    font: 16px/1.4 system-ui, sans-serif;
+    margin: 0;
+    background: #fafafa;
+    color: #222;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  header {
+    background: #333;
+    color: #fff;
+    padding: 10px 16px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  .panel {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    border-right: 1px solid #ddd;
+  }
+  .panel:last-child { border-right: none; }
+
+  .para {
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    transition: background 0.25s;
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .pnum {
+    display: inline-block;
+    min-width: 2em;
+    margin-right: 6px;
+    font-weight: 700;
+    color: #777;
+  }
+
+  .para.highlight {
+    background: #fff8b3;
+  }
+
+  .buttons {
+    display: flex;
+    justify-content: center;
+    padding: 10px;
+    background: #eee;
+    border-top: 1px solid #ccc;
+  }
+  button {
+    font-size: 15px;
+    padding: 8px 14px;
+    margin: 0 10px;
+    cursor: pointer;
+  }
+
+  #status {
+    background: #f5f5f5;
+    padding: 8px 12px;
+    border-top: 1px solid #ccc;
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 1.3;
+    max-height: 150px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+
+  .log-line { margin: 2px 0; }
+  .log-time { color: #999; margin-right: 6px; }
+  .log-text { color: #222; }
+  .log-match { color: #007a00; font-weight: 600; }
+  .log-nomatch { color: #a33; font-weight: 600; }
 </style>
-<h3>Operator</h3>
-<div class="cur" id="cur"></div>
-<div class="next" id="next"></div>
-<div style="margin-top:12px">
-  <button onclick="send({type:'prev'})">▲ Up</button>
-  <button onclick="send({type:'next'})">▼ Down</button>
+
+<header>Operator Console</header>
+
+<main>
+  <div id="koPanel" class="panel"></div>
+  <div id="enPanel" class="panel"></div>
+</main>
+
+<div class="buttons">
+  <button id="btnPrev">▲ Previous</button>
+  <button id="btnNext">▼ Next</button>
 </div>
-<div id="log"></div>
+
+<div id="status"><div id="log"></div></div>
+
 <script>
-  const log  = document.getElementById('log');
-  const cur  = document.getElementById('cur');
-  const next = document.getElementById('next');
-  const ws   = new WebSocket(`ws://${location.host}/ws`);
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const koPanel = document.getElementById('koPanel');
+  const enPanel = document.getElementById('enPanel');
+  const log = document.getElementById('log');
+
+  let paragraphsKO = [];
+  let paragraphsEN = [];
+  let curParaIdx = 0;
+  let lastMatchedParaIdx = -1;
 
   function send(o){ ws.send(JSON.stringify(o)); }
-  function append(s){ log.textContent += s + "\n"; log.scrollTop = log.scrollHeight; }
 
   ws.onmessage = (e) => {
-    try{
-      const d = JSON.parse(e.data);
-      if(d.type === "recognize"){
-        append("Recognized (KO): " + d.text);
-      }else if(d.type === "match"){
-        // show tag + English line
-        const tag = d.tag ? `[${d.tag}] ` : "";
-        cur.textContent  = `${tag}${d.line}${d.score ? " ("+d.score+"%)" : ""}`;
-        next.textContent = d.next || "";
-        append(`Match: ${tag}${d.line}${d.score ? " ("+d.score+"%)" : ""}`);
-      }else if(d.type === "info"){
-        append(d.msg || "");
+    try {
+      const d = JSON.parse(e.data || '{}');
+
+      if (d.type === 'init_paras') {
+        paragraphsKO = d.ko || [];
+        paragraphsEN = d.en || [];
+        renderPanels();
+        highlight(curParaIdx);
       }
-    }catch(_){}
+      else if (d.type === 'para_match') {
+        const newIdx = d.para_idx || 0;
+        if (newIdx !== lastMatchedParaIdx) {
+          highlight(newIdx);
+          addLog(`Matched paragraph ${newIdx + 1}`, true);
+          lastMatchedParaIdx = newIdx;
+        }
+      }
+      else if (d.type === 'recognize') {
+        addLog(`Recognized: ${d.text}`, false);
+      }
+      else if (d.type === 'info') {
+        addLog(d.msg || 'Info message', false, true);
+      }
+    } catch(_){}
   };
+
+  // ✅ 문단 번호 표시
+  function renderPanels(){
+    koPanel.innerHTML = '';
+    enPanel.innerHTML = '';
+    for (let i = 0; i < paragraphsKO.length; i++){
+      const p1 = document.createElement('div');
+      p1.className = 'para';
+      p1.id = `ko-p${i}`;
+      p1.innerHTML = `<span class="pnum">${i+1}.</span><span>${paragraphsKO[i]}</span>`;
+      koPanel.appendChild(p1);
+
+      const p2 = document.createElement('div');
+      p2.className = 'para';
+      p2.id = `en-p${i}`;
+      p2.innerHTML = `<span class="pnum">${i+1}.</span><span>${paragraphsEN[i]}</span>`;
+      enPanel.appendChild(p2);
+    }
+  }
+
+  function highlight(idx){
+    curParaIdx = idx;
+    const allKO = koPanel.querySelectorAll('.para');
+    const allEN = enPanel.querySelectorAll('.para');
+    allKO.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
+    allEN.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
+
+    const activeKO = document.getElementById(`ko-p${idx}`);
+    const activeEN = document.getElementById(`en-p${idx}`);
+    if (activeKO) activeKO.scrollIntoView({behavior:'smooth', block:'center'});
+    if (activeEN) activeEN.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+
+  function addLog(msg, isMatch=false, isInfo=false){
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    const t = document.createElement('span');
+    t.className = 'log-time';
+    t.textContent = `[${new Date().toLocaleTimeString()}] `;
+    const m = document.createElement('span');
+    m.className = 'log-text';
+    if (isMatch) m.classList.add('log-match');
+    if (isInfo) m.classList.add('log-nomatch');
+    m.textContent = msg;
+    line.appendChild(t);
+    line.appendChild(m);
+    log.appendChild(line);
+    const lines = log.querySelectorAll('.log-line');
+    if (lines.length > 6) log.removeChild(lines[0]);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  document.getElementById('btnPrev').addEventListener('click', ()=>{
+    curParaIdx = Math.max(0, curParaIdx - 1);
+    send({type:'prev'});
+    highlight(curParaIdx);
+    addLog(`Moved to paragraph ${curParaIdx + 1}`, true);
+    lastMatchedParaIdx = curParaIdx;
+  });
+
+  document.getElementById('btnNext').addEventListener('click', ()=>{
+    curParaIdx = Math.min(paragraphsKO.length - 1, curParaIdx + 1);
+    send({type:'next'});
+    highlight(curParaIdx);
+    addLog(`Moved to paragraph ${curParaIdx + 1}`, true);
+    lastMatchedParaIdx = curParaIdx;
+  });
 </script>

@@ -1,21 +1,85 @@
 <!doctype html><meta charset="utf-8">
 <title>Audience</title>
 <style>
-    body{background:#000;color:#fff;font:48px/1.35 system-ui, sans-serif;margin:40px}
-    .cur{margin-bottom:.4em}
-    .next{opacity:.45;font-size:.75em}
+    body {
+        background: #000;
+        color: #eee;
+        font: 32px/1.5 system-ui, sans-serif;
+        margin: 0;
+        padding: 40px;
+        overflow-y: auto;
+    }
+
+    .para {
+        margin-bottom: 1.0em;
+        padding: 0.3em 0.5em;
+        border-radius: 8px;
+        transition: background 0.4s, color 0.4s, transform 0.2s ease;
+    }
+
+    .para.highlight {
+        background: #222;
+        color: #fff;
+        transform: scale(1.02);
+    }
+
+    .para.dim {
+        color: #777;
+    }
+
+    #container {
+        max-width: 90vw;
+        margin: auto;
+    }
 </style>
-<div id="cur" class="cur"></div>
-<div id="next" class="next"></div>
+
+<div id="container"></div>
+
 <script>
     const ws = new WebSocket(`ws://${location.host}/ws`);
+    const container = document.getElementById('container');
+
+    let paragraphs = [];
+    let currentIdx = 0;
+
     ws.onmessage = (e) => {
-        try{
-            const d = JSON.parse(e.data);
-            if(d.type === "match"){
-                document.getElementById('cur').textContent  = d.line || "";
-                document.getElementById('next').textContent = d.next || "";
+        try {
+            const d = JSON.parse(e.data || '{}');
+
+            if (d.type === 'init_paras') {
+                paragraphs = d.en || [];
+                renderParagraphs();
+                highlight(currentIdx);
             }
-        }catch(_){}
+
+            if (d.type === 'para_match') {
+                const idx = d.para_idx || 0;
+                highlight(idx);
+            }
+        } catch(_){}
     };
+
+    function renderParagraphs() {
+        container.innerHTML = '';
+        for (let i = 0; i < paragraphs.length; i++) {
+            const div = document.createElement('div');
+            div.className = 'para';
+            div.textContent = paragraphs[i];
+            container.appendChild(div);
+        }
+    }
+
+    function highlight(idx) {
+        currentIdx = idx;
+        const all = container.querySelectorAll('.para');
+        all.forEach((el, i) => {
+            el.classList.toggle('highlight', i === idx);
+            el.classList.toggle('dim', i !== idx);
+        });
+
+        const active = all[idx];
+        if (active) {
+            active.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
 </script>

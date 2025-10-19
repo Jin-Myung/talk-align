@@ -70,7 +70,8 @@ def parse_paragraphs(path: str) -> Dict[int, List[str]]:
         nonlocal cur_no, cur_buf
         if cur_no is None:
             return
-        if cur_no <= len(paras):
+        # skip if already exists (avoid duplication)
+        if cur_no in paras:
             return
         paragraph_text = ' '.join([s for s in cur_buf if s.strip()])
         sents = [s.strip() for s in split_sentences(paragraph_text)]
@@ -113,15 +114,11 @@ def should_stop() -> bool:
     return stop_event.is_set()
 
 # ================================
-# Utterance length thresholds for script matching
+# Thresholds
 # ================================
 MIN_UTTER_TEXT_LEN_FOR_MATCH = 6      # require at least 6 significant chars
 MIN_UTTER_LEN_IN_MS_FOR_MATCH = 1000  # and at least 1 sec of speech
 MAX_UTTER_LEN_IN_MS = 10000  # truncate utterance to 10 sec in case of no silence
-
-# ================================
-# Script matching threshold
-# ================================
 SCRIPT_MATCH_THRESHOLD = 70  # require at least 70% similarity
 
 # ================================
@@ -151,96 +148,93 @@ def audio_capture():
             pass
 
 # ================================
-# Keep letters/digits/Hangul when counting significant chars
+# Keep letters/digits/KO when counting significant chars
 # ================================
 _sig_re = re.compile(r"[A-Za-z0-9\u3131-\u318E\uAC00-\uD7A3]")
 def significant_len(s: str) -> int:
     return len(_sig_re.findall(s))
 
-# ================================
-# Utils
-# ================================
 def clamp_idx(i: int) -> int:
     return max(0, min(TOTAL - 1, i))
 
 # ================================
 # Process utterance: STT + script alignment
 # ================================
-def process_utterance(ws, utter, pending_utter_text, pending_utter_len, current_line_in_script):
-    normalized_utter = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
-    utter_ms = int(len(normalized_utter) / RATE * 1000)
-
-    segments, _ = model.transcribe(normalized_utter, language="ko", beam_size=1)
+def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
+    normalized = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
+    utter_ms = int(len(normalized) / RATE * 1000)
+    segments, _ = model.transcribe(normalized, language="ko", beam_size=1)
     raw_text = "".join(seg.text for seg in segments).strip()
 
-    if raw_text:
-        combined_text = (pending_utter_text + " " + raw_text).strip() if pending_utter_text else raw_text
-        combined_ms = pending_utter_len + utter_ms
+    if not raw_text:
+        return pending_text, pending_ms, cur_idx
 
-        if significant_len(combined_text) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
-            print(f"\nRecognized: {combined_text}")
-            ws.send({"type": "recognize", "text": combined_text})
+    combined = (pending_text + " " + raw_text).strip() if pending_text else raw_text
+    combined_ms = pending_ms + utter_ms
 
-            start = clamp_idx(current_line_in_script - 1)
-            end = clamp_idx(current_line_in_script + 4)
-            search_range = aligned_ko[start:end]
+    if significant_len(combined) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
+        print(f"\nRecognized: {combined}")
+        ws.send({"type": "recognize", "text": combined})
 
-            if search_range:
-                match, score, idx_rel = process.extractOne(
-                    combined_text, search_range, scorer=fuzz.partial_ratio
-                )
-                idx = start + idx_rel
+        start = clamp_idx(cur_idx - 1)
+        end = clamp_idx(cur_idx + 4)
+        search_range = aligned_ko[start:end]
 
-                if score >= SCRIPT_MATCH_THRESHOLD:
-                    current_line_in_script = idx
-                    tag = aligned_tag[idx]
-                    en_line = aligned_en[idx]
-                    next_line = aligned_en[idx+1] if idx+1 < len(aligned_en) else ""
-                    print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
-                    ws.send({"type": "match", "idx": idx, "tag": tag, "line": en_line, "ko": aligned_ko[idx], "score": round(score, 1), "next": next_line})
-                else:
-                    print(f"No matching script (similarity {score:.3f}%)")
-                    ws.send({"type":"info", "msg": f"No match ({round(score,1)}%)"})
+        if search_range:
+            match, score, idx_rel = process.extractOne(combined, search_range, scorer=fuzz.partial_ratio)
+            idx = start + idx_rel
+
+            if score >= SCRIPT_MATCH_THRESHOLD:
+                cur_idx = idx
+                tag = aligned_tag[idx]
+                en_line = aligned_en[idx]
+                next_line = aligned_en[idx + 1] if idx + 1 < len(aligned_en) else ""
+                print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
+                ws.send({
+                    "type": "match",
+                    "idx": cur_idx,
+                    "tag": tag,
+                    "line": en_line,
+                    "ko": aligned_ko[idx],
+                    "score": round(score, 1),
+                    "next": next_line,
+                })
             else:
-                print("No matching script (end of script window)")
-                ws.send({"type":"info", "msg":"No matching script (window end)"})
-
-            pending_utter_text = ""
-            pending_utter_len = 0
+                print(f"No matching script (similarity {score:.3f}%)")
+                ws.send({"type": "info", "msg": f"No match ({round(score,1)}%)"})
         else:
-            pending_utter_text = combined_text
-            pending_utter_len = combined_ms
-            print(f"\nBuffering: "
-                  f"chars={significant_len(pending_utter_text)}/{MIN_UTTER_TEXT_LEN_FOR_MATCH}, "
-                  f"ms={pending_utter_len}/{MIN_UTTER_LEN_IN_MS_FOR_MATCH}")
+            ws.send({"type": "info", "msg": "No matching script (end of window)"})
 
-    return pending_utter_text, pending_utter_len, current_line_in_script
+        pending_text, pending_ms = "", 0
+    else:
+        pending_text, pending_ms = combined, combined_ms
+        print(f"\nBuffering: chars={significant_len(pending_text)}, ms={pending_ms}")
+
+    return pending_text, pending_ms, cur_idx
 
 # ================================
-# VAD + utterance processing loop
+# VAD + alignment loop
 # ================================
 def vad_loop(ws: WSBridge):
-    current_line_in_script = 0
+    cur_idx = 0
     utter = []
     in_utter = False
+    pending_text = ""
+    pending_ms = 0
 
-    # If an utterance is too short, we buffer it and prepend to the next one rather than matching a script line.
-    pending_utter_text = ""
-    pending_utter_len = 0  # in ms
-
-    # VAD hangover settings
     speech_start_frames = 2  # 2 * FRAME_DURATION = 60ms to confirm speech start
     silence_end_frames = 6   # 6 * FRAME_DURATION = 180ms to confirm end
     speech_count = 0
     silence_count = 0
 
+    # Send initial paragraph set to operator
+    ws.send({"type": "init_paras", "ko": aligned_ko_paras, "en": aligned_en_paras})
+
     if aligned_en:
-        tag = aligned_tag[current_line_in_script]
-        cur = aligned_en[current_line_in_script]
-        nxt = aligned_en[current_line_in_script + 1] if current_line_in_script + 1 < len(aligned_en) else ""
-        ws.send({"type": "match", "idx": current_line_in_script, "tag": tag, "line": cur, "ko": aligned_ko[current_line_in_script], "score": "", "next": nxt})
-    else:
-        ws.send({"type": "info", "msg": "Script is empty."})
+        tag = aligned_tag[cur_idx]
+        cur = aligned_en[cur_idx]
+        nxt = aligned_en[cur_idx + 1] if cur_idx + 1 < len(aligned_en) else ""
+        ws.send({"type": "para_match", "para_idx": cur_para_idx(cur_idx), "cur": cur, "next": nxt})
 
     while not should_stop():
         # commands from operator UI
@@ -248,19 +242,19 @@ def vad_loop(ws: WSBridge):
         if cmd:
             t = cmd.get("type")
             if t == "prev":
-                current_line_in_script = clamp_idx(current_line_in_script - 1)
-                tag = aligned_tag[current_line_in_script]
-                cur_en = aligned_en[current_line_in_script]
-                nxt_en = aligned_en[current_line_in_script + 1] if current_line_in_script + 1 < len(aligned_en) else ""
-                print(f"[OP] prev -> {tag}")
-                ws.send({"type": "match", "idx": current_line_in_script, "tag": tag, "line": cur_en, "ko": aligned_ko[current_line_in_script], "score": "", "next": nxt_en})
+                cur_idx = max(0, cur_idx - para_step(cur_idx))
             elif t == "next":
-                current_line_in_script = clamp_idx(current_line_in_script + 1)
-                tag = aligned_tag[current_line_in_script]
-                cur_en = aligned_en[current_line_in_script]
-                nxt_en = aligned_en[current_line_in_script + 1] if current_line_in_script + 1 < len(aligned_en) else ""
-                print(f"[OP] next -> {tag}")
-                ws.send({"type": "match", "idx": current_line_in_script, "tag": tag, "line": cur_en, "ko": aligned_ko[current_line_in_script], "score": "", "next": nxt_en})
+                cur_idx = min(TOTAL - 1, cur_idx + para_step(cur_idx))
+
+            # broadcast paragraph update
+            ws.send({
+                "type": "para_match",
+                "para_idx": cur_para_idx(cur_idx),
+                "cur": aligned_en_paras[cur_para_idx(cur_idx)],
+                "next": aligned_en_paras[cur_para_idx(cur_idx) + 1]
+                if cur_para_idx(cur_idx) + 1 < len(aligned_en_paras)
+                else "",
+            })
 
         try:
             frame = rt_audio_q.get(timeout=0.1)
@@ -284,41 +278,53 @@ def vad_loop(ws: WSBridge):
                     silence_count = 0
             else:
                 speech_count = 0
-
         else:
             utter.append(frame)
             if is_speech:
                 silence_count = 0
                 if len(utter) * FRAME_DURATION >= MAX_UTTER_LEN_IN_MS:
-                    # Force process if utterance too long
-                    pending_utter_text, pending_utter_len, current_line_in_script = process_utterance(
-                        ws, utter, pending_utter_text, pending_utter_len, current_line_in_script
+                    # force process when utterance is too long
+                    pending_text, pending_ms, cur_idx = process_utterance(
+                        ws, utter, pending_text, pending_ms, cur_idx
                     )
-                    # reset for next utterance
                     in_utter = False
                     speech_count = 0
                     utter = []
             else:
                 silence_count += 1
                 if silence_count >= silence_end_frames:
-                    pending_utter_text, pending_utter_len, current_line_in_script = process_utterance(
-                        ws, utter, pending_utter_text, pending_utter_len, current_line_in_script
+                    pending_text, pending_ms, cur_idx = process_utterance(
+                        ws, utter, pending_text, pending_ms, cur_idx
                     )
-                    # reset for next utterance
                     in_utter = False
                     speech_count = 0
                     silence_count = 0
                     utter = []
 
 # ================================
-# Signal handling / graceful shutdown
+# Helpers for paragraph tracking
+# ================================
+def cur_para_idx(line_idx: int) -> int:
+    for p_i, (start, end) in enumerate(para_ranges):
+        if start <= line_idx <= end:
+            return p_i
+    return 0
+
+def para_step(line_idx: int) -> int:
+    p_i = cur_para_idx(line_idx)
+    start, end = para_ranges[p_i]
+    return end - start + 1
+
+# ================================
+# Shutdown handling
 # ================================
 def request_shutdown(*_):
     print("\nShutting down...")
     stop_event.set()
     try:
         if stream is not None:
-            stream.stop_stream(); stream.close()
+            stream.stop_stream()
+            stream.close()
     except Exception:
         pass
     try:
@@ -365,53 +371,48 @@ webbrowser.open(audience_url)
 
 time.sleep(2)  # wait for WS to stabilize
 
-print("Loading script and prompt files:")
+print("Loading script and prompt files...")
 
-# Load KO & EN paragraphs
+# --- Parse paragraphs ---
 ko_paras = parse_paragraphs(ko_file)
 en_paras = parse_paragraphs(en_file)
 
-if not ko_paras:
-    print("Korean script has no paragraphs starting with '<n>.'")
-    sys.exit(1)
-if not en_paras:
-    print("English prompt has no paragraphs starting with '<n>.'")
+if not ko_paras or not en_paras:
+    print("Error: invalid KO/EN paragraph structure")
     sys.exit(1)
 
-# Build flat alignment list by paragraph intersection
-para_ids = sorted(set(ko_paras.keys()) & set(en_paras.keys()))
-if not para_ids:
-    print("No common paragraph numbers between KO/EN files.")
+common_ids = sorted(set(ko_paras.keys()) & set(en_paras.keys()))
+if not common_ids:
+    print("No common paragraph numbers.")
     sys.exit(1)
 
-aligned_ko: List[str] = []
-aligned_en: List[str] = []
-aligned_tag: List[str] = []  # e.g., "1.2"
+aligned_ko, aligned_en, aligned_tag = [], [], []
+aligned_ko_paras, aligned_en_paras, para_ranges = [], [], []
+line_counter = 0
 
-for p in para_ids:
-    ko_sents = ko_paras[p]
-    en_sents = en_paras[p]
-    if len(ko_sents) != len(en_sents):
-        print(f"Warning: sentence count mismatch in paragraph {p}: KO={len(ko_sents)} vs EN={len(en_sents)}")
+for pid in common_ids:
+    ko_sents, en_sents = ko_paras[pid], en_paras[pid]
     n = min(len(ko_sents), len(en_sents))
+    start = line_counter
     for i in range(n):
         aligned_ko.append(ko_sents[i])
         aligned_en.append(en_sents[i])
-        aligned_tag.append(f"{p}.{i+1}")
-
-if not aligned_ko:
-    print("No aligned sentences after parsing.")
-    sys.exit(1)
+        aligned_tag.append(f"{pid}.{i+1}")
+        line_counter += 1
+    end = line_counter - 1
+    para_ranges.append((start, end))
+    aligned_ko_paras.append(" ".join(ko_sents))
+    aligned_en_paras.append(" ".join(en_sents))
 
 TOTAL = len(aligned_ko)
-print(f"Loaded alignment: {TOTAL} sentences across {len(para_ids)} paragraphs")
+print(f"Loaded {len(common_ids)} paragraphs ({TOTAL} total sentences)")
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
 
 t1.start()
 t2.start()
-print(f"Ready. KO={ko_file}, EN={en_file}. Total aligned sentences: {TOTAL}. Press Ctrl+C to stop.")
+print("Ready. Press Ctrl+C to stop.")
 
 try:
     while not should_stop():
@@ -422,7 +423,6 @@ try:
 except KeyboardInterrupt:
     request_shutdown()
 
-# final join
 for t in (t1, t2):
     t.join(timeout=2.0)
 print("Shutdown complete")
