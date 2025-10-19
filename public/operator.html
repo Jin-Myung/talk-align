@@ -95,8 +95,8 @@
 </main>
 
 <div class="buttons">
-  <button id="btnPrev">▲ Previous</button>
-  <button id="btnNext">▼ Next</button>
+  <button id="btnPrev">▲</button>
+  <button id="btnNext">▼</button>
 </div>
 
 <div id="status"><div id="log"></div></div>
@@ -195,16 +195,10 @@
   document.getElementById('btnPrev').addEventListener('click', ()=>{
     curParaIdx = Math.max(0, curParaIdx - 1);
     send({type:'prev'});
-    highlight(curParaIdx);
-    addLog(`Moved to paragraph ${curParaIdx + 1}`, true);
-    lastMatchedParaIdx = curParaIdx;
   });
 
   document.getElementById('btnNext').addEventListener('click', ()=>{
     curParaIdx = Math.min(paragraphsKO.length - 1, curParaIdx + 1);
     send({type:'next'});
-    highlight(curParaIdx);
-    addLog(`Moved to paragraph ${curParaIdx + 1}`, true);
-    lastMatchedParaIdx = curParaIdx;
   });
 </script>
