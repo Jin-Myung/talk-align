@@ -1,11 +1,17 @@
-import sys, pyaudio, numpy as np, queue, threading, webrtcvad
 from faster_whisper import WhisperModel
+import gc
+import numpy as np
+import pyaudio
+import queue
 from rapidfuzz import process, fuzz
 import re
 import signal
+import sys
+import threading
 import time
 from typing import Dict, List
 import webbrowser
+import webrtcvad
 from wsbridge import WSBridge
 
 # --- Windows console UTF-8 fix ---
@@ -21,6 +27,9 @@ if os.name == "nt":
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+os.environ["PYTHONMALLOC"] = "malloc"   # prevent double-free crash on macOS
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # suppress background pool warnings
 
 # ================================
 # Args
@@ -124,21 +133,25 @@ SCRIPT_MATCH_THRESHOLD = 70  # require at least 70% similarity
 # ================================
 # Audio capture thread
 # ================================
+pa = None
 stream = None
 
 def audio_capture():
-    global stream
+    global pa, stream
     pa = pyaudio.PyAudio()
     stream = pa.open(format=FORMAT, channels=1, rate=RATE,
                      input=True, frames_per_buffer=FRAME_SIZE)
     try:
         while not should_stop():
-            # in case of overflow, skip frame
             frame = stream.read(FRAME_SIZE, exception_on_overflow=False)
             rt_audio_q.put(frame)
     finally:
         try:
-            stream.stop_stream()
+            if stream.is_active():
+                stream.stop_stream()
+        except Exception:
+            pass
+        try:
             stream.close()
         except Exception:
             pass
@@ -328,11 +341,26 @@ def request_shutdown(*_):
     except Exception:
         pass
     try:
-        rt_audio_q.put_nowait(b"")
+        if pa is not None:
+            pa.terminate()
     except Exception:
         pass
     try:
         ws.close()
+    except Exception:
+        pass
+    try:
+        rt_audio_q.put_nowait(b"")
+    except Exception:
+        pass
+    try:
+        del model
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        # wait a bit to let native threads exit cleanly
+        time.sleep(0.3)
     except Exception:
         pass
 
@@ -424,5 +452,7 @@ except KeyboardInterrupt:
     request_shutdown()
 
 for t in (t1, t2):
-    t.join(timeout=2.0)
+    t.join(timeout=1.0)
+time.sleep(0.3)  # ensure background threads fully shutdown
+gc.collect()
 print("Shutdown complete")
