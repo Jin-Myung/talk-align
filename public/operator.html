@@ -62,17 +62,14 @@
     padding: 10px 16px;
     font-size: 15px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-  }
-  .status-item {
-    margin: 4px 8px;
+    gap: 12px;
   }
   .status-label {
     font-weight: 600;
-    margin-right: 4px;
     color: #333;
+    margin-right: 6px;
   }
   .status-value {
     font-family: monospace;
@@ -122,9 +119,10 @@
 </main>
 
 <div class="status-panel">
-  <div class="status-item"><span class="status-label">Paragraph:</span><span id="lastPara" class="status-value">—</span></div>
-  <div class="status-item"><span class="status-label">Sentence:</span><span id="lastTag" class="status-value">—</span></div>
-  <div class="status-item"><span class="status-label">Recognized:</span><span id="lastText" class="status-value">—</span></div>
+  <span class="status-label">📍</span>
+  <span id="position" class="status-value">-.-</span>
+  <span class="status-label">💬</span>
+  <span id="recognized" class="status-value" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</span>
 </div>
 
 <div class="buttons">
@@ -140,15 +138,13 @@
   const enPanel = document.getElementById('enPanel');
   const log = document.getElementById('log');
 
-  // real-time status DOM
-  const lastPara = document.getElementById('lastPara');
-  const lastTag  = document.getElementById('lastTag');
-  const lastText = document.getElementById('lastText');
+  const position = document.getElementById('position');
+  const recognized = document.getElementById('recognized');
 
   let paragraphsKO = [];
   let paragraphsEN = [];
-  let curParaIdx = 0;
   let lastMatchedParaIdx = -1;
+  let lastSentenceId = "-";
 
   function send(o){ ws.send(JSON.stringify(o)); }
 
@@ -160,7 +156,6 @@
         paragraphsKO = d.ko || [];
         paragraphsEN = d.en || [];
         renderPanels();
-        highlight(curParaIdx);
       }
       else if (d.type === 'para_match') {
         const newIdx = d.para_idx || 0;
@@ -168,18 +163,18 @@
           highlight(newIdx);
           addLog(`Matched paragraph ${newIdx + 1}`, true);
           lastMatchedParaIdx = newIdx;
-          lastPara.textContent = newIdx + 1;
+          updatePosition(newIdx + 1, lastSentenceId);
         }
       }
       else if (d.type === 'recognize') {
-        lastText.textContent = d.text;
+        recognized.textContent = d.text;
         addLog(`Recognized: ${d.text}`, false);
       }
       else if (d.type === 'match') {
-        if (d.tag) lastTag.textContent = d.tag;
-        if (typeof d.idx !== 'undefined') {
+        if (d.tag) {
+          lastSentenceId = d.tag.split('.')[1] || "-";
           const paraIdx = cur_para_idx_from_tag(d.tag);
-          lastPara.textContent = paraIdx + 1;
+          updatePosition(paraIdx + 1, lastSentenceId);
         }
       }
       else if (d.type === 'info') {
@@ -192,6 +187,10 @@
     if (!tag) return 0;
     const parts = tag.split('.');
     return parseInt(parts[0], 10) - 1 || 0;
+  }
+
+  function updatePosition(paraNum, sentNum){
+    position.textContent = `${paraNum}.${sentNum || "-"}`;
   }
 
   function renderPanels(){
@@ -213,7 +212,6 @@
   }
 
   function highlight(idx){
-    curParaIdx = idx;
     const allKO = koPanel.querySelectorAll('.para');
     const allEN = enPanel.querySelectorAll('.para');
     allKO.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
@@ -245,12 +243,10 @@
   }
 
   document.getElementById('btnPrev').addEventListener('click', ()=>{
-    curParaIdx = Math.max(0, curParaIdx - 1);
     send({type:'prev'});
   });
 
   document.getElementById('btnNext').addEventListener('click', ()=>{
-    curParaIdx = Math.min(paragraphsKO.length - 1, curParaIdx + 1);
     send({type:'next'});
   });
 </script>
