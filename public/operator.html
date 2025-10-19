@@ -145,6 +145,7 @@
   let paragraphsEN = [];
   let lastMatchedParaIdx = -1;
   let lastSentenceId = "-";
+  let buttonsLocked = false;
 
   function send(o){ ws.send(JSON.stringify(o)); }
 
@@ -165,6 +166,7 @@
           lastMatchedParaIdx = newIdx;
           updatePosition(newIdx + 1, lastSentenceId);
         }
+        unlockButtons();
       }
       else if (d.type === 'recognize') {
         recognized.textContent = d.text;
@@ -242,11 +244,23 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  function lockButtons() {
+    if (buttonsLocked) return;
+    buttonsLocked = true;
+  }
+  function unlockButtons() {
+    buttonsLocked = false;
+  }
+
   document.getElementById('btnPrev').addEventListener('click', ()=>{
+    if (buttonsLocked) return;
+    lockButtons();
     send({type:'prev'});
   });
 
   document.getElementById('btnNext').addEventListener('click', ()=>{
+    if (buttonsLocked) return;
+    lockButtons();
     send({type:'next'});
   });
 </script>
