@@ -54,6 +54,33 @@
     background: #fff8b3;
   }
 
+  /* Status panel */
+  .status-panel {
+    background: #e9eef3;
+    border-top: 1px solid #ccc;
+    border-bottom: 1px solid #ccc;
+    padding: 10px 16px;
+    font-size: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .status-item {
+    margin: 4px 8px;
+  }
+  .status-label {
+    font-weight: 600;
+    margin-right: 4px;
+    color: #333;
+  }
+  .status-value {
+    font-family: monospace;
+    background: #fff;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
   .buttons {
     display: flex;
     justify-content: center;
@@ -94,6 +121,12 @@
   <div id="enPanel" class="panel"></div>
 </main>
 
+<div class="status-panel">
+  <div class="status-item"><span class="status-label">Paragraph:</span><span id="lastPara" class="status-value">—</span></div>
+  <div class="status-item"><span class="status-label">Sentence:</span><span id="lastTag" class="status-value">—</span></div>
+  <div class="status-item"><span class="status-label">Recognized:</span><span id="lastText" class="status-value">—</span></div>
+</div>
+
 <div class="buttons">
   <button id="btnPrev">▲</button>
   <button id="btnNext">▼</button>
@@ -106,6 +139,11 @@
   const koPanel = document.getElementById('koPanel');
   const enPanel = document.getElementById('enPanel');
   const log = document.getElementById('log');
+
+  // real-time status DOM
+  const lastPara = document.getElementById('lastPara');
+  const lastTag  = document.getElementById('lastTag');
+  const lastText = document.getElementById('lastText');
 
   let paragraphsKO = [];
   let paragraphsEN = [];
@@ -130,10 +168,19 @@
           highlight(newIdx);
           addLog(`Matched paragraph ${newIdx + 1}`, true);
           lastMatchedParaIdx = newIdx;
+          lastPara.textContent = newIdx + 1;
         }
       }
       else if (d.type === 'recognize') {
+        lastText.textContent = d.text;
         addLog(`Recognized: ${d.text}`, false);
+      }
+      else if (d.type === 'match') {
+        if (d.tag) lastTag.textContent = d.tag;
+        if (typeof d.idx !== 'undefined') {
+          const paraIdx = cur_para_idx_from_tag(d.tag);
+          lastPara.textContent = paraIdx + 1;
+        }
       }
       else if (d.type === 'info') {
         addLog(d.msg || 'Info message', false, true);
@@ -141,7 +188,12 @@
     } catch(_){}
   };
 
-  // ✅ 문단 번호 표시
+  function cur_para_idx_from_tag(tag){
+    if (!tag) return 0;
+    const parts = tag.split('.');
+    return parseInt(parts[0], 10) - 1 || 0;
+  }
+
   function renderPanels(){
     koPanel.innerHTML = '';
     enPanel.innerHTML = '';
