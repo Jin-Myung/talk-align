@@ -84,12 +84,17 @@
     padding: 10px;
     background: #eee;
     border-top: 1px solid #ccc;
+    gap: 20px;
   }
   button {
     font-size: 15px;
     padding: 8px 14px;
-    margin: 0 10px;
     cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   #status {
@@ -137,6 +142,8 @@
   const koPanel = document.getElementById('koPanel');
   const enPanel = document.getElementById('enPanel');
   const log = document.getElementById('log');
+  const btnPrev = document.getElementById('btnPrev');
+  const btnNext = document.getElementById('btnNext');
 
   const position = document.getElementById('position');
   const recognized = document.getElementById('recognized');
@@ -146,13 +153,13 @@
   let lastMatchedParaIdx = -1;
   let lastSentenceId = "-";
   let buttonsLocked = false;
+  let lockTimer = null;
 
   function send(o){ ws.send(JSON.stringify(o)); }
 
   ws.onmessage = (e) => {
     try {
       const d = JSON.parse(e.data || '{}');
-
       if (d.type === 'init_paras') {
         paragraphsKO = d.ko || [];
         paragraphsEN = d.en || [];
@@ -166,7 +173,6 @@
           lastMatchedParaIdx = newIdx;
           updatePosition(newIdx + 1, lastSentenceId);
         }
-        unlockButtons();
       }
       else if (d.type === 'recognize') {
         recognized.textContent = d.text;
@@ -244,23 +250,36 @@
     log.scrollTop = log.scrollHeight;
   }
 
-  function lockButtons() {
+  function lockButtons(durationMs = 1000) {
     if (buttonsLocked) return;
     buttonsLocked = true;
-  }
-  function unlockButtons() {
-    buttonsLocked = false;
+    btnPrev.disabled = true;
+    btnNext.disabled = true;
+    clearTimeout(lockTimer);
+    lockTimer = setTimeout(() => {
+      buttonsLocked = false;
+      btnPrev.disabled = false;
+      btnNext.disabled = false;
+    }, durationMs);
   }
 
-  document.getElementById('btnPrev').addEventListener('click', ()=>{
+  function handleMove(direction) {
     if (buttonsLocked) return;
     lockButtons();
-    send({type:'prev'});
-  });
+    send({type: direction});
+  }
 
-  document.getElementById('btnNext').addEventListener('click', ()=>{
-    if (buttonsLocked) return;
-    lockButtons();
-    send({type:'next'});
+  btnPrev.addEventListener('click', () => handleMove('prev'));
+  btnNext.addEventListener('click', () => handleMove('next'));
+
+  // ✅ 키보드 ↑ ↓ 로 제어
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      handleMove('prev');
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      handleMove('next');
+    }
   });
 </script>
