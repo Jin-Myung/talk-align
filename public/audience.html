@@ -47,6 +47,7 @@
             const d = JSON.parse(e.data || '{}');
 
             if (d.type === 'init_paras') {
+                container.innerHTML = '';
                 paragraphs = d.en || [];
                 renderParagraphs();
                 highlight(currentIdx);

@@ -19,6 +19,24 @@
     font-weight: 600;
   }
 
+  .file-loader {
+    background: #eee;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border-bottom: 1px solid #ccc;
+  }
+  .file-loader input[type=file] {
+    font-size: 13px;
+  }
+  .file-loader button {
+    padding: 6px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
   main {
     flex: 1;
     display: flex;
@@ -113,16 +131,25 @@
   .log-time { color: #999; margin-right: 6px; }
   .log-text { color: #222; }
   .log-match { color: #007a00; font-weight: 600; }
-  .log-nomatch { color: #a33; font-weight: 600; }
 </style>
 
 <header>Operator Console</header>
 
+<!-- File upload banner -->
+<div class="file-loader">
+  <label>Load Script & Prompt:</label>
+  <input type="file" id="fileKO" accept=".txt">
+  <input type="file" id="fileEN" accept=".txt">
+  <button id="btnLoad">Load</button>
+</div>
+
+<!-- Script/prompt panel -->
 <main>
   <div id="koPanel" class="panel"></div>
   <div id="enPanel" class="panel"></div>
 </main>
 
+<!-- Recognized text -->
 <div class="status-panel">
   <span class="status-label">📍</span>
   <span id="position" class="status-value">-.-</span>
@@ -130,11 +157,13 @@
   <span id="recognized" class="status-value" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</span>
 </div>
 
+<!-- Paragraph move buttons -->
 <div class="buttons">
   <button id="btnPrev">▲</button>
   <button id="btnNext">▼</button>
 </div>
 
+<!-- Log messages -->
 <div id="status"><div id="log"></div></div>
 
 <script>
@@ -144,9 +173,12 @@
   const log = document.getElementById('log');
   const btnPrev = document.getElementById('btnPrev');
   const btnNext = document.getElementById('btnNext');
-
   const position = document.getElementById('position');
   const recognized = document.getElementById('recognized');
+
+  const fileKO = document.getElementById('fileKO');
+  const fileEN = document.getElementById('fileEN');
+  const btnLoad = document.getElementById('btnLoad');
 
   let paragraphsKO = [];
   let paragraphsEN = [];
@@ -164,6 +196,7 @@
         paragraphsKO = d.ko || [];
         paragraphsEN = d.en || [];
         renderPanels();
+        addLog(`Loaded ${paragraphsKO.length} paragraphs`);
       }
       else if (d.type === 'para_match') {
         const newIdx = d.para_idx || 0;
@@ -186,7 +219,7 @@
         }
       }
       else if (d.type === 'info') {
-        addLog(d.msg || 'Info message', false, true);
+        addLog(d.msg || 'Info message', false);
       }
     } catch(_){}
   };
@@ -196,6 +229,19 @@
     const parts = tag.split('.');
     return parseInt(parts[0], 10) - 1 || 0;
   }
+
+  btnLoad.addEventListener('click', async () => {
+    const koFile = fileKO.files[0];
+    const enFile = fileEN.files[0];
+    if (!koFile || !enFile) {
+      alert("Specify two files.");
+      return;
+    }
+    const koText = await koFile.text();
+    const enText = await enFile.text();
+    send({type: "load_files", ko_text: koText, en_text: enText});
+    addLog(`Sent files to server: ${koFile.name}, ${enFile.name}`);
+  });
 
   function updatePosition(paraNum, sentNum){
     position.textContent = `${paraNum}.${sentNum || "-"}`;
@@ -224,14 +270,13 @@
     const allEN = enPanel.querySelectorAll('.para');
     allKO.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
     allEN.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
-
     const activeKO = document.getElementById(`ko-p${idx}`);
     const activeEN = document.getElementById(`en-p${idx}`);
     if (activeKO) activeKO.scrollIntoView({behavior:'smooth', block:'center'});
     if (activeEN) activeEN.scrollIntoView({behavior:'smooth', block:'center'});
   }
 
-  function addLog(msg, isMatch=false, isInfo=false){
+  function addLog(msg, isMatch=false){
     const line = document.createElement('div');
     line.className = 'log-line';
     const t = document.createElement('span');
@@ -240,13 +285,12 @@
     const m = document.createElement('span');
     m.className = 'log-text';
     if (isMatch) m.classList.add('log-match');
-    if (isInfo) m.classList.add('log-nomatch');
     m.textContent = msg;
     line.appendChild(t);
     line.appendChild(m);
     log.appendChild(line);
     const lines = log.querySelectorAll('.log-line');
-    if (lines.length > 6) log.removeChild(lines[0]);
+    if (lines.length > 8) log.removeChild(lines[0]);
     log.scrollTop = log.scrollHeight;
   }
 
@@ -272,7 +316,6 @@
   btnPrev.addEventListener('click', () => handleMove('prev'));
   btnNext.addEventListener('click', () => handleMove('next'));
 
-  // ✅ 키보드 ↑ ↓ 로 제어
   document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowUp') {
       e.preventDefault();
