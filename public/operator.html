@@ -35,6 +35,10 @@
     padding: 6px 14px;
     font-size: 14px;
     cursor: pointer;
+    transition: background 0.2s;
+  }
+  .file-loader button:hover {
+    background: #ddd;
   }
 
   main {
@@ -175,7 +179,6 @@
   const btnNext = document.getElementById('btnNext');
   const position = document.getElementById('position');
   const recognized = document.getElementById('recognized');
-
   const fileKO = document.getElementById('fileKO');
   const fileEN = document.getElementById('fileEN');
   const btnLoad = document.getElementById('btnLoad');
@@ -189,6 +192,10 @@
 
   function send(o){ ws.send(JSON.stringify(o)); }
 
+  ws.onopen = () => addLog("Connected to server");
+
+  ws.onclose = () => addLog("Connection closed. Refresh if needed.");
+
   ws.onmessage = (e) => {
     try {
       const d = JSON.parse(e.data || '{}');
@@ -200,7 +207,7 @@
       }
       else if (d.type === 'para_match') {
         const newIdx = d.para_idx || 0;
-        if (newIdx !== lastMatchedParaIdx) {
+        if (newIdx !== lastMatchedParaIdx || d.reloading) {
           highlight(newIdx);
           addLog(`Matched paragraph ${newIdx + 1}`, true);
           lastMatchedParaIdx = newIdx;
@@ -209,7 +216,7 @@
       }
       else if (d.type === 'recognize') {
         recognized.textContent = d.text;
-        addLog(`Recognized: ${d.text}`, false);
+        addLog(`Recognized: ${d.text}`);
       }
       else if (d.type === 'match') {
         if (d.tag) {
@@ -219,7 +226,7 @@
         }
       }
       else if (d.type === 'info') {
-        addLog(d.msg || 'Info message', false);
+        addLog(d.msg || 'Info');
       }
     } catch(_){}
   };

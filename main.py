@@ -267,6 +267,31 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
     return pending_text, pending_ms, cur_idx
 
 # ================================
+# Helpers for paragraph tracking
+# ================================
+def cur_para_idx(line_idx: int) -> int:
+    for p_i, (start, end) in enumerate(para_ranges):
+        if start <= line_idx <= end:
+            return p_i
+    return 0
+
+def para_step(line_idx: int) -> int:
+    p_i = cur_para_idx(line_idx)
+    start, end = para_ranges[p_i]
+    return end - start + 1
+
+# ================================
+# Handle file upload (Operator)
+# ================================
+def handle_uploaded_files(ws, cmd):
+    ko_text = cmd.get("ko_text", "")
+    en_text = cmd.get("en_text", "")
+    if not ko_text or not en_text:
+        ws.send({"type": "info", "msg": "Both KO/EN text required"})
+        return
+    load_scripts_from_text(ws, ko_text, en_text)
+
+# ================================
 # VAD + alignment loop
 # ================================
 def vad_loop(ws: WSBridge):
@@ -282,13 +307,11 @@ def vad_loop(ws: WSBridge):
     silence_count = 0
 
     # Send initial paragraph set to operator
-    ws.send({"type": "init_paras", "ko": aligned_ko_paras, "en": aligned_en_paras})
+    if aligned_ko_paras and aligned_en_paras:
+        ws.send({"type": "init_paras", "ko": aligned_ko_paras, "en": aligned_en_paras})
 
     if aligned_en:
-        tag = aligned_tag[cur_idx]
-        cur = aligned_en[cur_idx]
-        nxt = aligned_en[cur_idx + 1] if cur_idx + 1 < len(aligned_en) else ""
-        ws.send({"type": "para_match", "para_idx": cur_para_idx(cur_idx), "cur": cur, "next": nxt})
+        ws.send({"type": "para_match", "para_idx": cur_para_idx(cur_idx), "reloading": True})
 
     while not should_stop():
         # commands from operator UI
@@ -299,15 +322,15 @@ def vad_loop(ws: WSBridge):
                 cur_idx = max(0, cur_idx - para_step(cur_idx))
             elif t == "next":
                 cur_idx = min(TOTAL - 1, cur_idx + para_step(cur_idx))
+            elif t == "load_files":
+                handle_uploaded_files(ws, cmd)
+                cur_idx = 0
 
             # broadcast paragraph update
             ws.send({
                 "type": "para_match",
                 "para_idx": cur_para_idx(cur_idx),
-                "cur": aligned_en_paras[cur_para_idx(cur_idx)],
-                "next": aligned_en_paras[cur_para_idx(cur_idx) + 1]
-                if cur_para_idx(cur_idx) + 1 < len(aligned_en_paras)
-                else "",
+                "reloading": t == "load_files",
             })
 
         try:
@@ -354,20 +377,6 @@ def vad_loop(ws: WSBridge):
                     speech_count = 0
                     silence_count = 0
                     utter = []
-
-# ================================
-# Helpers for paragraph tracking
-# ================================
-def cur_para_idx(line_idx: int) -> int:
-    for p_i, (start, end) in enumerate(para_ranges):
-        if start <= line_idx <= end:
-            return p_i
-    return 0
-
-def para_step(line_idx: int) -> int:
-    p_i = cur_para_idx(line_idx)
-    start, end = para_ranges[p_i]
-    return end - start + 1
 
 # ================================
 # Shutdown handling
