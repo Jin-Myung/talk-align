@@ -67,10 +67,8 @@ def split_sentences(text: str) -> List[str]:
 # ================================
 _para_start_re = re.compile(r'^\s*(\d+)\.\s*(.*)$')
 
-def parse_paragraphs(path: str) -> Dict[int, List[str]]:
-    with open(path, 'r', encoding='utf-8') as f:
-        lines = [ln.rstrip() for ln in f]
-
+def parse_paragraphs_from_text(text: str) -> Dict[int, List[str]]:
+    lines = [ln.rstrip() for ln in text.splitlines()]
     paras: Dict[int, List[str]] = {}
     cur_no: int = None
     cur_buf: List[str] = []
@@ -99,9 +97,12 @@ def parse_paragraphs(path: str) -> Dict[int, List[str]]:
             # header or paragraph body continuation
             if cur_no is not None:
                 cur_buf.append(ln)
-
     flush()
     return paras
+
+def parse_paragraphs(path: str) -> Dict[int, List[str]]:
+    with open(path, 'r', encoding='utf-8') as f:
+        return parse_paragraphs_from_text(f.read())
 
 # ================================
 # Initialize model / audio / VAD
