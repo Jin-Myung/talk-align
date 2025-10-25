@@ -1,6 +1,7 @@
 from faster_whisper import WhisperModel
 import gc
 import numpy as np
+import os
 import pyaudio
 import queue
 from rapidfuzz import process, fuzz
@@ -15,7 +16,6 @@ import webrtcvad
 from wsbridge import WSBridge
 
 # --- Windows console UTF-8 fix ---
-import os
 if os.name == "nt":
     try:
         import ctypes
@@ -116,7 +116,7 @@ FORMAT = pyaudio.paInt16
 
 vad = webrtcvad.Vad(1)   # VAD sensitivity (0=permissive, 3=aggressive)
 
-rt_audio_q = queue.Queue()
+rt_audio_q = queue.Queue(maxsize=100)  # real-time audio frames
 
 # ---- graceful shutdown event ----
 stop_event = threading.Event()
@@ -170,6 +170,46 @@ def significant_len(s: str) -> int:
 
 def clamp_idx(i: int) -> int:
     return max(0, min(TOTAL - 1, i))
+
+# ================================
+# Dynamic script loader
+# ================================
+aligned_ko, aligned_en, aligned_tag = [], [], []
+aligned_ko_paras, aligned_en_paras, para_ranges = [], [], []
+TOTAL = 0
+
+def load_scripts_from_text(ws, ko_text: str, en_text: str):
+    global aligned_ko, aligned_en, aligned_tag, aligned_ko_paras, aligned_en_paras, para_ranges, TOTAL
+
+    ko_paras = parse_paragraphs_from_text(ko_text)
+    en_paras = parse_paragraphs_from_text(en_text)
+
+    if not ko_paras or not en_paras:
+        ws.send({"type": "info", "msg": "Invalid KO/EN paragraphs"})
+        return
+
+    common_ids = sorted(set(ko_paras.keys()) & set(en_paras.keys()))
+    aligned_ko, aligned_en, aligned_tag = [], [], []
+    aligned_ko_paras, aligned_en_paras, para_ranges = [], [], []
+    line_counter = 0
+
+    for pid in common_ids:
+        ko_sents, en_sents = ko_paras[pid], en_paras[pid]
+        n = min(len(ko_sents), len(en_sents))
+        start = line_counter
+        for i in range(n):
+            aligned_ko.append(ko_sents[i])
+            aligned_en.append(en_sents[i])
+            aligned_tag.append(f"{pid}.{i+1}")
+            line_counter += 1
+        end = line_counter - 1
+        para_ranges.append((start, end))
+        aligned_ko_paras.append(" ".join(ko_sents))
+        aligned_en_paras.append(" ".join(en_sents))
+
+    TOTAL = len(aligned_ko)
+    ws.send({"type": "init_paras", "ko": aligned_ko_paras, "en": aligned_en_paras})
+    ws.send({"type": "info", "msg": f"Loaded {len(common_ids)} paragraphs ({TOTAL} total sentences)"})
 
 # ================================
 # Process utterance: STT + script alignment
@@ -395,46 +435,17 @@ print("Opening URL for operator and audience:\n")
 print(f"  - {operator_url}")
 print(f"  - {audience_url}\n")
 
-webbrowser.open(operator_url)
-webbrowser.open(audience_url)
+# webbrowser.open(operator_url)
+# webbrowser.open(audience_url)
 
 time.sleep(2)  # wait for WS to stabilize
 
 print("Loading script and prompt files...")
 
-# --- Parse paragraphs ---
-ko_paras = parse_paragraphs(ko_file)
-en_paras = parse_paragraphs(en_file)
+with open(ko_file, encoding="utf-8") as f1, open(en_file, encoding="utf-8") as f2:
+    load_scripts_from_text(ws, f1.read(), f2.read())
 
-if not ko_paras or not en_paras:
-    print("Error: invalid KO/EN paragraph structure")
-    sys.exit(1)
-
-common_ids = sorted(set(ko_paras.keys()) & set(en_paras.keys()))
-if not common_ids:
-    print("No common paragraph numbers.")
-    sys.exit(1)
-
-aligned_ko, aligned_en, aligned_tag = [], [], []
-aligned_ko_paras, aligned_en_paras, para_ranges = [], [], []
-line_counter = 0
-
-for pid in common_ids:
-    ko_sents, en_sents = ko_paras[pid], en_paras[pid]
-    n = min(len(ko_sents), len(en_sents))
-    start = line_counter
-    for i in range(n):
-        aligned_ko.append(ko_sents[i])
-        aligned_en.append(en_sents[i])
-        aligned_tag.append(f"{pid}.{i+1}")
-        line_counter += 1
-    end = line_counter - 1
-    para_ranges.append((start, end))
-    aligned_ko_paras.append(" ".join(ko_sents))
-    aligned_en_paras.append(" ".join(en_sents))
-
-TOTAL = len(aligned_ko)
-print(f"Loaded {len(common_ids)} paragraphs ({TOTAL} total sentences)")
+print(f"Loaded {len(aligned_ko_paras)} paragraphs ({TOTAL} total sentences)")
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
