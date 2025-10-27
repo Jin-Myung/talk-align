@@ -395,6 +395,12 @@ def vad_loop(ws: WSBridge):
                     silence_count = 0
                     utter = []
 
+def heartbeat_loop(ws):
+    interval = 1  # seconds
+    while not should_stop():
+        ws.send({"type": "alive", "ts": time.time()})
+        time.sleep(interval)
+
 # ================================
 # Shutdown handling
 # ================================
@@ -448,7 +454,7 @@ if hasattr(signal, "SIGBREAK"):
 try:
     ws = WSBridge("ws://127.0.0.1:8000/ws")
 except ConnectionRefusedError:
-    print("Error: Start wsbridge server first `uvicorn server:app --host 0.0.0.0 --port 8000`")
+    print("Error: Start webserver first `uvicorn server:app --host 0.0.0.0 --port 8000`")
     sys.exit(1)
 except Exception as e:
     print("WebSocket connection error: ", e)
@@ -477,22 +483,21 @@ else:
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
+t3 = threading.Thread(target=heartbeat_loop, args=(ws,), daemon=True)
 
 t1.start()
 t2.start()
+t3.start()
 print("Ready. Press Ctrl+C to stop.")
 
 try:
     while not should_stop():
-        t1.join(timeout=0.5)
-        t2.join(timeout=0.5)
-        if not t1.is_alive() and not t2.is_alive():
-            break
+        time.sleep(1)
 except KeyboardInterrupt:
     request_shutdown()
 
-for t in (t1, t2):
+for t in (t1, t2, t3):
     t.join(timeout=1.0)
-time.sleep(0.3)  # ensure background threads fully shutdown
+time.sleep(0.5)  # ensure background threads fully shutdown
 gc.collect()
 print("Shutdown complete")

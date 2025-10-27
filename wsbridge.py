@@ -6,7 +6,7 @@ class WSBridge:
     def __init__(self, url="ws://127.0.0.1:8000/ws"):
         self.ws = create_connection(url)
         self.lock = threading.Lock()
-        self.cmd_q = queue.Queue()
+        self.cmd_q = queue.Queue(maxsize=5)
 
         def receiver():
             while True:

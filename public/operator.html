@@ -141,6 +141,7 @@
 
 <!-- File upload banner -->
 <div class="file-loader">
+  <span id="connStatus" style="font-weight:600;color:#a00;">🔴 Disconnected</span>
   <label>Load Script & Prompt:</label>
   <input type="file" id="fileKO" accept=".txt">
   <input type="file" id="fileEN" accept=".txt">
@@ -179,6 +180,7 @@
   const btnNext = document.getElementById('btnNext');
   const position = document.getElementById('position');
   const recognized = document.getElementById('recognized');
+  const connStatus = document.getElementById('connStatus');
   const fileKO = document.getElementById('fileKO');
   const fileEN = document.getElementById('fileEN');
   const btnLoad = document.getElementById('btnLoad');
@@ -189,17 +191,33 @@
   let lastSentenceId = "-";
   let buttonsLocked = false;
   let lockTimer = null;
+  let lastAlive = Date.now();
+  let connected = false;
 
-  function send(o){ ws.send(JSON.stringify(o)); }
+  function send(o){
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(o));
+    }
+  }
 
-  ws.onopen = () => addLog("Connected to server");
+  ws.onopen = () => addLog("Socket opened (awaiting heartbeat...)");
 
-  ws.onclose = () => addLog("Connection closed. Refresh if needed.");
+  ws.onclose = () => {
+    setConnectionState(false)
+    addLog("Connection closed. Refresh if needed.");
+  }
 
   ws.onmessage = (e) => {
     try {
       const d = JSON.parse(e.data || '{}');
-      if (d.type === 'init_paras') {
+      if (d.type === 'alive') {
+        lastAlive = Date.now();
+        if (!connected) {
+          setConnectionState(true);
+          addLog("Reconnected to server.");
+        }
+      }
+      else if (d.type === 'init_paras') {
         paragraphsKO = d.ko || [];
         paragraphsEN = d.en || [];
         renderPanels();
@@ -297,7 +315,7 @@
     line.appendChild(m);
     log.appendChild(line);
     const lines = log.querySelectorAll('.log-line');
-    if (lines.length > 8) log.removeChild(lines[0]);
+    if (lines.length > 20) log.removeChild(lines[0]);
     log.scrollTop = log.scrollHeight;
   }
 
@@ -319,6 +337,21 @@
     lockButtons();
     send({type: direction});
   }
+
+  function setConnectionState(ok) {
+    connected = ok;
+    connStatus.textContent = ok ? '🟢 Connected' : '🔴 Disconnected';
+    connStatus.style.color = ok ? "#070" : "#a00";
+    fileKO.disabled = fileEN.disabled = btnLoad.disabled = btnPrev.disabled = btnNext.disabled = !ok;
+  }
+
+  setInterval(() => {
+    const now = Date.now();
+    if (now - lastAlive > 3000 && connected) {
+      setConnectionState(false);
+      addLog("Connection lost.");
+    }
+  }, 1000);
 
   btnPrev.addEventListener('click', () => handleMove('prev'));
   btnNext.addEventListener('click', () => handleMove('next'));
