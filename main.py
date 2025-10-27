@@ -34,12 +34,18 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"  # suppress background pool warni
 # ================================
 # Args
 # ================================
-if len(sys.argv) < 3:
-    print("Usage: python main.py <ko_script.txt> <en_prompt.txt>")
-    sys.exit(1)
+ko_file = None
+en_file = None
 
-ko_file = sys.argv[1]
-en_file = sys.argv[2]
+if len(sys.argv) == 3:
+    ko_file = sys.argv[1]
+    en_file = sys.argv[2]
+    print(f"Using provided script files: {ko_file}, {en_file}")
+elif len(sys.argv) == 1:
+    print("No input files provided. Waiting for upload via Operator UI...")
+else:
+    print("Usage: python main.py <ko_script.txt> <en_script.txt>")
+    sys.exit(1)
 
 # ================================
 # Sentence splitter (language-agnostic, simple)
@@ -462,10 +468,12 @@ time.sleep(2)  # wait for WS to stabilize
 
 print("Loading script and prompt files...")
 
-with open(ko_file, encoding="utf-8") as f1, open(en_file, encoding="utf-8") as f2:
-    load_scripts_from_text(ws, f1.read(), f2.read())
-
-print(f"Loaded {len(aligned_ko_paras)} paragraphs ({TOTAL} total sentences)")
+if ko_file and en_file:
+    with open(ko_file, encoding="utf-8") as f1, open(en_file, encoding="utf-8") as f2:
+        load_scripts_from_text(ws, f1.read(), f2.read())
+    print(f"Loaded {len(aligned_ko_paras)} paragraphs ({TOTAL} total sentences)")
+else:
+    print("No initial files — will wait for Operator to upload.")
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
