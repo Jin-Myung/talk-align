@@ -296,6 +296,7 @@ def handle_uploaded_files(ws, cmd):
 # ================================
 def vad_loop(ws: WSBridge):
     cur_idx = 0
+    last_sent_para_idx = -1
     utter = []
     in_utter = False
     pending_text = ""
@@ -315,7 +316,13 @@ def vad_loop(ws: WSBridge):
 
     while not should_stop():
         # commands from operator UI
-        cmd = ws.get_cmd_nowait()
+        cmd = None
+        while True:
+            try:
+                cmd = ws.get_cmd_nowait()  # If there exist multiple commands, process only the latest one
+            except queue.Empty:
+                break
+
         if cmd:
             t = cmd.get("type")
             if t == "prev":
@@ -325,13 +332,17 @@ def vad_loop(ws: WSBridge):
             elif t == "load_files":
                 handle_uploaded_files(ws, cmd)
                 cur_idx = 0
+                last_sent_para_idx = -1
 
-            # broadcast paragraph update
-            ws.send({
-                "type": "para_match",
-                "para_idx": cur_para_idx(cur_idx),
-                "reloading": t == "load_files",
-            })
+            new_para_idx = cur_para_idx(cur_idx)
+            if new_para_idx != last_sent_para_idx or t == "load_files":
+                last_sent_para_idx = new_para_idx
+                # broadcast paragraph update
+                ws.send({
+                    "type": "para_match",
+                    "para_idx": cur_para_idx(cur_idx),
+                    "reloading": t == "load_files",
+                })
 
         try:
             frame = rt_audio_q.get(timeout=0.1)

@@ -40,7 +40,7 @@
     const container = document.getElementById('container');
 
     let paragraphs = [];
-    let currentIdx = 0;
+    let currentIdx = -1;
 
     ws.onmessage = (e) => {
         try {
@@ -50,11 +50,12 @@
                 container.innerHTML = '';
                 paragraphs = d.en || [];
                 renderParagraphs();
-                highlight(currentIdx);
+                if (paragraphs.length > 0) highlight(0);
             }
 
             if (d.type === 'para_match') {
                 const idx = d.para_idx || 0;
+                if (idx === currentIdx) return;
                 highlight(idx);
             }
         } catch(_){}

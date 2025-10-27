@@ -26,10 +26,7 @@ class WSBridge:
             self.ws.send(json.dumps(payload, ensure_ascii=False))
 
     def get_cmd_nowait(self):
-        try:
-            return self.cmd_q.get_nowait()
-        except queue.Empty:
-            return None
+        return self.cmd_q.get_nowait()
 
     def close(self):
         with self.lock:
