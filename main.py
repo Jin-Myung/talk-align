@@ -124,6 +124,8 @@ vad = webrtcvad.Vad(1)   # VAD sensitivity (0=permissive, 3=aggressive)
 
 rt_audio_q = queue.Queue(maxsize=100)  # real-time audio frames
 
+is_muted = False
+
 # ---- graceful shutdown event ----
 stop_event = threading.Event()
 def should_stop() -> bool:
@@ -151,7 +153,8 @@ def audio_capture():
     try:
         while not should_stop():
             frame = stream.read(FRAME_SIZE, exception_on_overflow=False)
-            rt_audio_q.put(frame)
+            if not is_muted:
+                rt_audio_q.put(frame)
     finally:
         try:
             if stream.is_active():
@@ -238,7 +241,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
     combined_ms = pending_ms + utter_ms
 
     if significant_len(combined) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
-        print(f"\nRecognized: {combined}")
+        print(f"Recognized: {combined}")
         ws.send({"type": "recognize", "text": combined})
 
         start = clamp_idx(cur_idx - 1)
@@ -273,7 +276,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
         pending_text, pending_ms = "", 0
     else:
         pending_text, pending_ms = combined, combined_ms
-        print(f"\nBuffering: chars={significant_len(pending_text)}, ms={pending_ms}")
+        print(f"Buffering: chars={significant_len(pending_text)}, ms={pending_ms}")
 
     return pending_text, pending_ms, cur_idx
 
@@ -329,14 +332,7 @@ def vad_loop(ws: WSBridge):
         ws.send({"type": "para_match", "para_idx": cur_para_idx(cur_idx), "reloading": True})
 
     while not should_stop():
-        # commands from operator UI
-        cmd = None
-        while True:
-            try:
-                cmd = ws.get_cmd_nowait()  # If there exist multiple commands, process only the latest one
-            except queue.Empty:
-                break
-
+        cmd = ws.get_cmd_nowait()
         if cmd:
             t = cmd.get("type")
             if t == "prev":
@@ -347,6 +343,11 @@ def vad_loop(ws: WSBridge):
                 handle_uploaded_files(ws, cmd)
                 cur_idx = 0
                 last_sent_para_idx = -1
+            elif t == "mute":
+                global is_muted
+                is_muted = bool(cmd.get("value", False))
+                ws.send({"type": "info", "msg": f"Mute {'ON' if is_muted else 'OFF'}"})
+                print(f"Mute {'ON' if is_muted else 'OFF'}")
 
             new_para_idx = cur_para_idx(cur_idx)
             if new_para_idx != last_sent_para_idx or t == "load_files":
@@ -474,9 +475,6 @@ audience_url = "http://127.0.0.1:8000/public/audience.html"
 print("Opening URL for operator and audience:\n")
 print(f"  - {operator_url}")
 print(f"  - {audience_url}\n")
-
-# webbrowser.open(operator_url)
-# webbrowser.open(audience_url)
 
 time.sleep(2)  # wait for WS to stabilize
 

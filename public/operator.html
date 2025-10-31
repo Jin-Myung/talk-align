@@ -88,6 +88,21 @@
     flex-wrap: wrap;
     gap: 12px;
   }
+  .mute-btn {
+    background: transparent;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    transition: transform 0.2s, color 0.2s;
+    color: #555;
+  }
+  .mute-btn.active {
+    color: #a00;
+    transform: scale(1.2);
+  }
+  .mute-btn:hover {
+    opacity: 0.8;
+  }
   .status-label {
     font-weight: 600;
     color: #333;
@@ -162,6 +177,7 @@
 
 <!-- Recognized text -->
 <div class="status-panel">
+  <button id="btnMute" class="mute-btn" title="Mute microphone">🔇</button>
   <span class="status-label">📍</span>
   <span id="position" class="status-value">-.-</span>
   <span class="status-label">💬</span>
@@ -179,26 +195,28 @@
 
 <script>
   const ws = new WebSocket(`ws://${location.host}/ws`);
-  const koPanel = document.getElementById('koPanel');
-  const enPanel = document.getElementById('enPanel');
-  const log = document.getElementById('log');
-  const btnPrev = document.getElementById('btnPrev');
-  const btnNext = document.getElementById('btnNext');
-  const position = document.getElementById('position');
-  const recognized = document.getElementById('recognized');
   const connStatus = document.getElementById('connStatus');
   const fileKO = document.getElementById('fileKO');
   const fileEN = document.getElementById('fileEN');
   const btnLoad = document.getElementById('btnLoad');
+  const koPanel = document.getElementById('koPanel');
+  const enPanel = document.getElementById('enPanel');
+  const btnMute = document.getElementById('btnMute');
+  const position = document.getElementById('position');
+  const recognized = document.getElementById('recognized');
+  const btnPrev = document.getElementById('btnPrev');
+  const btnNext = document.getElementById('btnNext');
+  const log = document.getElementById('log');
 
+  let connected = false;
+  let lastAlive = Date.now();
   let paragraphsKO = [];
   let paragraphsEN = [];
   let lastMatchedParaIdx = -1;
   let lastSentenceId = "-";
+  let muted = false;
   let buttonsLocked = false;
   let lockTimer = null;
-  let lastAlive = Date.now();
-  let connected = false;
 
   function send(o){
     if (ws.readyState === WebSocket.OPEN) {
@@ -220,6 +238,7 @@
         lastAlive = Date.now();
         if (!connected) {
           setConnectionState(true);
+          toggleMute(true);
           addLog("Reconnected to server.");
         }
       }
@@ -278,6 +297,13 @@
     position.textContent = `${paraNum}.${sentNum || "-"}`;
   }
 
+  function setConnectionState(ok) {
+    connected = ok;
+    connStatus.textContent = ok ? '🟢 Connected' : '🔴 Disconnected';
+    connStatus.style.color = ok ? "#070" : "#a00";
+    fileKO.disabled = fileEN.disabled = btnLoad.disabled = btnPrev.disabled = btnNext.disabled = !ok;
+  }
+
   function renderPanels(){
     koPanel.innerHTML = '';
     enPanel.innerHTML = '';
@@ -305,6 +331,14 @@
     const activeEN = document.getElementById(`en-p${idx}`);
     if (activeKO) activeKO.scrollIntoView({behavior:'smooth', block:'center'});
     if (activeEN) activeEN.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+
+  function toggleMute(is_muted=true){
+    muted = !is_muted;
+    btnMute.classList.toggle('active', muted);
+    btnMute.title = muted ? "Unmute microphone" : "Mute microphone";
+    btnMute.textContent = muted ? "🔈" : "🔇";
+    send({ type: 'mute', value: muted });
   }
 
   function addLog(msg, isMatch=false){
@@ -354,13 +388,6 @@
     send({type: direction});
   }
 
-  function setConnectionState(ok) {
-    connected = ok;
-    connStatus.textContent = ok ? '🟢 Connected' : '🔴 Disconnected';
-    connStatus.style.color = ok ? "#070" : "#a00";
-    fileKO.disabled = fileEN.disabled = btnLoad.disabled = btnPrev.disabled = btnNext.disabled = !ok;
-  }
-
   setInterval(() => {
     const now = Date.now();
     if (now - lastAlive > 3000 && connected) {
@@ -369,6 +396,7 @@
     }
   }, 1000);
 
+  btnMute.addEventListener('click', () => toggleMute(muted));
   btnPrev.addEventListener('click', () => handleMove('prev'));
   btnNext.addEventListener('click', () => handleMove('next'));
 
