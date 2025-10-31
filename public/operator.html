@@ -315,7 +315,7 @@
     line.className = 'log-line';
     const t = document.createElement('span');
     t.className = 'log-time';
-    t.textContent = `[${new Date().toLocaleTimeString()}] `;
+    t.textContent = `[${new Date().toLocaleTimeString('en-US', {hour12:false})}]`;
     const m = document.createElement('span');
     m.className = 'log-text';
     if (isMatch) m.classList.add('log-match');
