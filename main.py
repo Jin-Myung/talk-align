@@ -480,14 +480,14 @@ print(f"  - {audience_url}\n")
 
 time.sleep(2)  # wait for WS to stabilize
 
-print("Loading script and prompt files...")
-
 if ko_file and en_file:
+    print("Loading script and prompt files...")
     with open(ko_file, encoding="utf-8") as f1, open(en_file, encoding="utf-8") as f2:
         load_scripts_from_text(ws, f1.read(), f2.read())
     print(f"Loaded {len(aligned_ko_paras)} paragraphs ({TOTAL} total sentences)")
 else:
     print("No initial files — will wait for Operator to upload.")
+    ws.send({"type": "init_paras", "ko": [], "en": []})
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
