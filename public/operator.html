@@ -119,15 +119,21 @@
     cursor: not-allowed;
   }
 
+  /* Log container */
   #status {
     background: #f5f5f5;
-    padding: 8px 12px;
     border-top: 1px solid #ccc;
     font-family: monospace;
     font-size: 13px;
     line-height: 1.3;
-    max-height: 150px;
-    overflow-y: auto;
+    max-height: 135px;
+    overflow: hidden; /* overflow moved to #log */
+  }
+
+  #log {
+    padding: 8px 12px;
+    height: 127px;
+    overflow-y: auto; /* scroll here */
     white-space: pre-wrap;
   }
 
@@ -302,6 +308,9 @@
   }
 
   function addLog(msg, isMatch=false){
+    const nearBottom =
+            Math.abs(log.scrollHeight - log.scrollTop - log.clientHeight) < 5;
+
     const line = document.createElement('div');
     line.className = 'log-line';
     const t = document.createElement('span');
@@ -314,9 +323,16 @@
     line.appendChild(t);
     line.appendChild(m);
     log.appendChild(line);
-    const lines = log.querySelectorAll('.log-line');
-    if (lines.length > 20) log.removeChild(lines[0]);
-    log.scrollTop = log.scrollHeight;
+
+    if (log.children.length > 5000) {
+      log.removeChild(log.firstChild);
+    }
+
+    if (nearBottom) {
+      requestAnimationFrame(() => {
+        log.scrollTop = log.scrollHeight;
+      });
+    }
   }
 
   function lockButtons(durationMs = 1000) {
