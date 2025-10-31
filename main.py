@@ -221,9 +221,14 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
 # Process utterance: STT + script alignment
 # ================================
 def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
-    normalized = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
-    utter_ms = int(len(normalized) / RATE * 1000)
-    segments, _ = model.transcribe(normalized, language="ko", beam_size=1)
+    try:
+        normalized = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
+        utter_ms = int(len(normalized) / RATE * 1000)
+        segments, _ = model.transcribe(normalized, language="ko", beam_size=1)
+    except Exception as e:
+        print("STT error:", e)
+        ws.send({"type": "info", "msg": f"STT error: {e}"})
+        return pending_text, pending_ms, cur_idx
     raw_text = "".join(seg.text for seg in segments).strip()
 
     if not raw_text:
@@ -283,8 +288,11 @@ def cur_para_idx(line_idx: int) -> int:
 
 def para_step(line_idx: int) -> int:
     p_i = cur_para_idx(line_idx)
-    start, end = para_ranges[p_i]
-    return end - start + 1
+    if p_i >= len(para_ranges):
+        return 0
+    else:
+        start, end = para_ranges[p_i]
+        return end - start + 1
 
 # ================================
 # Handle file upload (Operator)
@@ -398,7 +406,10 @@ def vad_loop(ws: WSBridge):
 def heartbeat_loop(ws):
     interval = 1  # seconds
     while not should_stop():
-        ws.send({"type": "alive", "ts": time.time()})
+        try:
+            ws.send({"type": "alive", "ts": time.time()})
+        except Exception:
+            pass
         time.sleep(interval)
 
 # ================================
@@ -407,6 +418,10 @@ def heartbeat_loop(ws):
 def request_shutdown(*_):
     print("\nShutting down...")
     stop_event.set()
+    try:
+        rt_audio_q.put_nowait(b"")
+    except Exception:
+        pass
     try:
         if stream is not None:
             stream.stop_stream()
@@ -423,19 +438,12 @@ def request_shutdown(*_):
     except Exception:
         pass
     try:
-        rt_audio_q.put_nowait(b"")
-    except Exception:
-        pass
-    try:
         del model
         gc.collect()
     except Exception:
         pass
-    try:
-        # wait a bit to let native threads exit cleanly
-        time.sleep(0.3)
-    except Exception:
-        pass
+    # wait a bit to let native threads exit cleanly
+    time.sleep(0.3)
 
 for sig in (signal.SIGINT, signal.SIGTERM):
     try:
