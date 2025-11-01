@@ -217,7 +217,7 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
         aligned_en_paras.append(" ".join(en_sents))
 
     TOTAL = len(aligned_ko)
-    ws.send({"type": "init_paras", "ko": aligned_ko_paras, "en": aligned_en_paras})
+    ws.send({"type": "init_para", "ko": aligned_ko_paras, "en": aligned_en_paras})
     print(f"Loaded {len(common_ids)} paragraphs and {TOTAL} sentences")
 
 # ================================
@@ -259,7 +259,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
                 next_line = aligned_en[idx + 1] if idx + 1 < len(aligned_en) else ""
                 print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
                 ws.send({
-                    "type": "match",
+                    "type": "match_sent",
                     "idx": cur_sent_idx,
                     "tag": tag,
                     "line": en_line,
@@ -324,7 +324,7 @@ def vad_loop(ws: WSBridge):
     silence_count = 0
 
     if aligned_en:
-        ws.send({"type": "para_match", "para_idx": sent_idx_to_para_idx(cur_sent_idx), "sent_idx": cur_sent_idx, "reloading": True})
+        ws.send({"type": "move_para", "para_idx": sent_idx_to_para_idx(cur_sent_idx), "sent_idx": cur_sent_idx, "reloading": True})
 
     while not should_stop():
         cmd = ws.get_cmd_nowait()
@@ -352,7 +352,7 @@ def vad_loop(ws: WSBridge):
             last_sent_para_idx = new_para_idx
             base_sent_idx, _ = para_idx_to_sent_idx(last_sent_para_idx)
             ws.send({
-                "type": "para_match",
+                "type": "move_para",
                 "para_idx": last_sent_para_idx,
                 "sent_idx": cur_sent_idx - base_sent_idx,
                 "reloading": cmd and cmd.get("type") == "load_files",
@@ -483,7 +483,7 @@ if ko_file and en_file:
         load_scripts_from_text(ws, f1.read(), f2.read())
 else:
     print("No initial files — will wait for Operator to upload.")
-    ws.send({"type": "init_paras", "ko": [], "en": []})
+    ws.send({"type": "init_para", "ko": [], "en": []})
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)

@@ -250,13 +250,13 @@
           addLog("Reconnected to server.");
         }
       }
-      else if (d.type === 'init_paras') {
+      else if (d.type === 'init_para') {
         paragraphsKO = d.ko || [];
         paragraphsEN = d.en || [];
         renderPanels();
         addLog(`Loaded ${paragraphsKO.length} paragraphs`);
       }
-      else if (d.type === 'para_match') {
+      else if (d.type === 'move_para') {
         const newIdx = d.para_idx || 0;
         if (newIdx !== lastMatchedParaIdx || d.reloading) {
           highlight(newIdx);
@@ -270,7 +270,7 @@
         recognized.textContent = d.text;
         addLog(`Recognized: ${d.text}`);
       }
-      else if (d.type === 'match') {
+      else if (d.type === 'match_sent') {
         if (d.tag) {
           lastSentenceId = d.tag.split('.')[1] || "-";
           const paraIdx = cur_para_idx_from_tag(d.tag);

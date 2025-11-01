@@ -46,14 +46,14 @@
         try {
             const d = JSON.parse(e.data || '{}');
 
-            if (d.type === 'init_paras') {
+            if (d.type === 'init_para') {
                 container.innerHTML = '';
                 paragraphs = d.en || [];
                 renderParagraphs();
                 if (paragraphs.length > 0) highlight(0);
             }
 
-            if (d.type === 'para_match') {
+            if (d.type === 'move_para') {
                 const idx = d.para_idx || 0;
                 if (idx === currentIdx) return;
                 highlight(idx);
