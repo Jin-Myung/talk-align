@@ -247,9 +247,14 @@
         lastAlive = Date.now();
         if (!connected) {
           setConnectionState(true);
-          toggleMute(true);
           addLog("Reconnected to server.");
         }
+      }
+      else if (d.type === 'init_paras') {
+        paragraphsKO = d.ko || [];
+        paragraphsEN = d.en || [];
+        renderPanels();
+        addLog(`Loaded ${paragraphsKO.length} paragraphs`);
       }
       else if (d.type === 'para_match') {
         const newIdx = d.para_idx || 0;
@@ -305,6 +310,11 @@
     connStatus.textContent = ok ? '🟢 Connected' : '🔴 Disconnected';
     connStatus.style.color = ok ? "#070" : "#a00";
     btnLoad.disabled = btnPrev.disabled = btnNext.disabled = !ok;
+    if (!ok) {
+      position.textContent = "-.-";
+      recognized.textContent = "-";
+    }
+    toggleMute(ok);
   }
 
   function renderPanels(){
@@ -341,6 +351,9 @@
     btnMute.classList.toggle('active', muted);
     btnMute.title = muted ? "Unmute microphone" : "Mute microphone";
     btnMute.textContent = muted ? "🔈" : "🔇";
+    if (muted) {
+      recognized.textContent = "-";
+    }
     send({ type: 'mute', value: muted });
   }
 

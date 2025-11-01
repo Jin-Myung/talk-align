@@ -217,8 +217,8 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
         aligned_en_paras.append(" ".join(en_sents))
 
     TOTAL = len(aligned_ko)
-    print(f"Loaded {len(aligned_ko_paras)} paragraphs and {TOTAL} sentences")
-    ws.send({"type": "info", "msg": f"Loaded {len(common_ids)} paragraphs ({TOTAL} total sentences)"})
+    ws.send({"type": "init_paras", "ko": aligned_ko_paras, "en": aligned_en_paras})
+    print(f"Loaded {len(common_ids)} paragraphs and {TOTAL} sentences")
 
 # ================================
 # Process utterance: STT + script alignment
