@@ -24,9 +24,14 @@
     padding: 8px 10px;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     gap: 10px;
     border-bottom: 1px solid #ccc;
+  }
+  .file-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
   .file-loader input[type=file] {
     font-size: 13px;
@@ -158,15 +163,17 @@
   .log-match { color: #007a00; font-weight: 600; }
 </style>
 
-<header>Operator Console</header>
+<header>Talk-Align Console</header>
 
 <!-- File upload banner -->
 <div class="file-loader">
   <span id="connStatus" style="font-weight:600;color:#a00;">🔴 Disconnected</span>
-  <label>Load Script & Prompt:</label>
-  <input type="file" id="fileKO" accept=".txt">
-  <input type="file" id="fileEN" accept=".txt">
-  <button id="btnLoad">Load</button>
+  <div class="file-controls">
+    <label>Load Script & Prompt:</label>
+    <input type="file" id="fileKO" accept=".txt">
+    <input type="file" id="fileEN" accept=".txt">
+    <button id="btnLoad">Load</button>
+  </div>
 </div>
 
 <!-- Script/prompt panel -->
