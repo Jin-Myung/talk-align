@@ -137,6 +137,7 @@
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    pointer-events: none;
   }
 
   /* Log container */
@@ -169,8 +170,9 @@
 <div class="file-loader">
   <span id="connStatus" style="font-weight:600;color:#a00;">🔴 Disconnected</span>
   <div class="file-controls">
-    <label>Load Script & Prompt:</label>
+    <label>KO Script:</label>
     <input type="file" id="fileKO" accept=".txt">
+    <label>EN Prompt:</label>
     <input type="file" id="fileEN" accept=".txt">
     <button id="btnLoad">Load</button>
   </div>
@@ -249,12 +251,6 @@
           addLog("Reconnected to server.");
         }
       }
-      else if (d.type === 'init_paras') {
-        paragraphsKO = d.ko || [];
-        paragraphsEN = d.en || [];
-        renderPanels();
-        addLog(`Loaded ${paragraphsKO.length} paragraphs`);
-      }
       else if (d.type === 'para_match') {
         const newIdx = d.para_idx || 0;
         if (newIdx !== lastMatchedParaIdx || d.reloading) {
@@ -308,7 +304,7 @@
     connected = ok;
     connStatus.textContent = ok ? '🟢 Connected' : '🔴 Disconnected';
     connStatus.style.color = ok ? "#070" : "#a00";
-    fileKO.disabled = fileEN.disabled = btnLoad.disabled = btnPrev.disabled = btnNext.disabled = !ok;
+    btnLoad.disabled = btnPrev.disabled = btnNext.disabled = !ok;
   }
 
   function renderPanels(){
@@ -408,12 +404,14 @@
   btnNext.addEventListener('click', () => handleMove('next'));
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      handleMove('prev');
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      handleMove('next');
+    if (connected) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        handleMove('prev');
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        handleMove('next');
+      }
     }
   });
 </script>

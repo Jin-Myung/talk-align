@@ -217,7 +217,7 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
         aligned_en_paras.append(" ".join(en_sents))
 
     TOTAL = len(aligned_ko)
-    ws.send({"type": "init_paras", "ko": aligned_ko_paras, "en": aligned_en_paras})
+    print(f"Loaded {len(aligned_ko_paras)} paragraphs and {TOTAL} sentences")
     ws.send({"type": "info", "msg": f"Loaded {len(common_ids)} paragraphs ({TOTAL} total sentences)"})
 
 # ================================
@@ -331,11 +331,6 @@ def vad_loop(ws: WSBridge):
         cmd = ws.get_cmd_nowait()
         if cmd:
             t = cmd.get("type")
-            if t == "init_paras":
-                print(f"Command: init_paras ko({len(cmd.get('ko', []))}), en({len(cmd.get('en', []))})")
-            elif t != "alive" and t != "recognize" and t != "info":
-                print(f"Command: {cmd}")
-
             if t == "prev":
                 cur_idx = max(0, cur_idx - para_step(cur_idx))
             elif t == "next":
@@ -347,7 +342,6 @@ def vad_loop(ws: WSBridge):
             elif t == "mute":
                 global is_muted
                 is_muted = bool(cmd.get("value", False))
-                ws.send({"type": "info", "msg": f"Mute {'ON' if is_muted else 'OFF'}"})
                 print(f"Mute {'ON' if is_muted else 'OFF'}")
 
         new_para_idx = cur_para_idx(cur_idx)
@@ -483,10 +477,8 @@ if ko_file and en_file:
     print("Loading script and prompt files...")
     with open(ko_file, encoding="utf-8") as f1, open(en_file, encoding="utf-8") as f2:
         load_scripts_from_text(ws, f1.read(), f2.read())
-    print(f"Loaded {len(aligned_ko_paras)} paragraphs ({TOTAL} total sentences)")
 else:
     print("No initial files — will wait for Operator to upload.")
-    ws.send({"type": "init_paras", "ko": [], "en": []})
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
