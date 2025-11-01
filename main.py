@@ -324,10 +324,6 @@ def vad_loop(ws: WSBridge):
     speech_count = 0
     silence_count = 0
 
-    # Send initial paragraph set to operator
-    if aligned_ko_paras and aligned_en_paras:
-        ws.send({"type": "init_paras", "ko": aligned_ko_paras, "en": aligned_en_paras})
-
     if aligned_en:
         ws.send({"type": "para_match", "para_idx": cur_para_idx(cur_idx), "reloading": True})
 
@@ -335,6 +331,11 @@ def vad_loop(ws: WSBridge):
         cmd = ws.get_cmd_nowait()
         if cmd:
             t = cmd.get("type")
+            if t == "init_paras":
+                print(f"Command: init_paras ko({len(cmd.get('ko', []))}), en({len(cmd.get('en', []))})")
+            elif t != "alive" and t != "recognize" and t != "info":
+                print(f"Command: {cmd}")
+
             if t == "prev":
                 cur_idx = max(0, cur_idx - para_step(cur_idx))
             elif t == "next":
@@ -349,15 +350,15 @@ def vad_loop(ws: WSBridge):
                 ws.send({"type": "info", "msg": f"Mute {'ON' if is_muted else 'OFF'}"})
                 print(f"Mute {'ON' if is_muted else 'OFF'}")
 
-            new_para_idx = cur_para_idx(cur_idx)
-            if new_para_idx != last_sent_para_idx or t == "load_files":
-                last_sent_para_idx = new_para_idx
-                # broadcast paragraph update
-                ws.send({
-                    "type": "para_match",
-                    "para_idx": cur_para_idx(cur_idx),
-                    "reloading": t == "load_files",
-                })
+        new_para_idx = cur_para_idx(cur_idx)
+        if new_para_idx != last_sent_para_idx or (cmd and cmd.get("type") == "load_files"):
+            last_sent_para_idx = new_para_idx
+            # broadcast paragraph update
+            ws.send({
+                "type": "para_match",
+                "para_idx": cur_para_idx(cur_idx),
+                "reloading": cmd and cmd.get("type") == "load_files",
+            })
 
         try:
             frame = rt_audio_q.get(timeout=0.1)
