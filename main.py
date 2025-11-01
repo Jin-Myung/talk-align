@@ -249,6 +249,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
             idx = start + idx_rel
 
             if score >= SCRIPT_MATCH_THRESHOLD:
+                idx = min(idx + 1, TOTAL - 1) # highlight next sentence while recognizing current sentence
                 cur_sent_idx = idx
                 tag = aligned_tag[idx]
                 en_line = aligned_en[idx]
