@@ -283,14 +283,14 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
 # ================================
 # Helpers for paragraph tracking
 # ================================
-def cur_para_idx(line_idx: int) -> int:
-    for p_i, (start, end) in enumerate(para_ranges):
-        if start <= line_idx <= end:
-            return p_i
+def sent_idx_to_para_idx(sent_idx: int) -> int:
+    for para_idx, (start, end) in enumerate(para_ranges):
+        if start <= sent_idx <= end:
+            return para_idx
     return 0
 
 def para_step(line_idx: int) -> int:
-    p_i = cur_para_idx(line_idx)
+    p_i = sent_idx_to_para_idx(line_idx)
     if p_i >= len(para_ranges):
         return 0
     else:
@@ -312,7 +312,7 @@ def handle_uploaded_files(ws, cmd):
 # VAD + alignment loop
 # ================================
 def vad_loop(ws: WSBridge):
-    cur_idx = 0
+    cur_sent_idx = 0
     last_sent_para_idx = -1
     utter = []
     in_utter = False
@@ -325,32 +325,32 @@ def vad_loop(ws: WSBridge):
     silence_count = 0
 
     if aligned_en:
-        ws.send({"type": "para_match", "para_idx": cur_para_idx(cur_idx), "reloading": True})
+        ws.send({"type": "para_match", "para_idx": sent_idx_to_para_idx(cur_sent_idx), "reloading": True})
 
     while not should_stop():
         cmd = ws.get_cmd_nowait()
         if cmd:
             t = cmd.get("type")
             if t == "prev":
-                cur_idx = max(0, cur_idx - para_step(cur_idx))
+                cur_sent_idx = max(0, cur_sent_idx - para_step(cur_sent_idx))
             elif t == "next":
-                cur_idx = min(TOTAL - 1, cur_idx + para_step(cur_idx))
+                cur_sent_idx = min(TOTAL - 1, cur_sent_idx + para_step(cur_sent_idx))
             elif t == "load_files":
                 handle_uploaded_files(ws, cmd)
-                cur_idx = 0
+                cur_sent_idx = 0
                 last_sent_para_idx = -1
             elif t == "mute":
                 global is_muted
                 is_muted = bool(cmd.get("value", False))
                 print(f"Mute {'ON' if is_muted else 'OFF'}")
 
-        new_para_idx = cur_para_idx(cur_idx)
+        new_para_idx = sent_idx_to_para_idx(cur_sent_idx)
         if new_para_idx != last_sent_para_idx or (cmd and cmd.get("type") == "load_files"):
             last_sent_para_idx = new_para_idx
             # broadcast paragraph update
             ws.send({
                 "type": "para_match",
-                "para_idx": cur_para_idx(cur_idx),
+                "para_idx": sent_idx_to_para_idx(cur_sent_idx),
                 "reloading": cmd and cmd.get("type") == "load_files",
             })
 
@@ -382,8 +382,8 @@ def vad_loop(ws: WSBridge):
                 silence_count = 0
                 if len(utter) * FRAME_DURATION >= MAX_UTTER_LEN_IN_MS:
                     # force process when utterance is too long
-                    pending_text, pending_ms, cur_idx = process_utterance(
-                        ws, utter, pending_text, pending_ms, cur_idx
+                    pending_text, pending_ms, cur_sent_idx = process_utterance(
+                        ws, utter, pending_text, pending_ms, cur_sent_idx
                     )
                     in_utter = False
                     speech_count = 0
@@ -391,8 +391,8 @@ def vad_loop(ws: WSBridge):
             else:
                 silence_count += 1
                 if silence_count >= silence_end_frames:
-                    pending_text, pending_ms, cur_idx = process_utterance(
-                        ws, utter, pending_text, pending_ms, cur_idx
+                    pending_text, pending_ms, cur_sent_idx = process_utterance(
+                        ws, utter, pending_text, pending_ms, cur_sent_idx
                     )
                     in_utter = False
                     speech_count = 0

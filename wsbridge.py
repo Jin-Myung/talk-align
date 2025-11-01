@@ -23,7 +23,10 @@ class WSBridge:
 
     def send(self, payload: dict):
         with self.lock:
-            self.ws.send(json.dumps(payload, ensure_ascii=False))
+            try:
+                self.ws.send(json.dumps(payload, ensure_ascii=False))
+            except WebSocketConnectionClosedException:
+                pass
 
     def get_cmd_nowait(self):
         try:
