@@ -479,6 +479,7 @@ if ko_file and en_file:
         load_scripts_from_text(ws, f1.read(), f2.read())
 else:
     print("No initial files — will wait for Operator to upload.")
+    ws.send({"type": "init_paras", "ko": [], "en": []})
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
