@@ -223,7 +223,7 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
 # ================================
 # Process utterance: STT + script alignment
 # ================================
-def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
+def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
     try:
         normalized = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
         utter_ms = int(len(normalized) / RATE * 1000)
@@ -231,11 +231,11 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
     except Exception as e:
         print("STT error:", e)
         ws.send({"type": "info", "msg": f"STT error: {e}"})
-        return pending_text, pending_ms, cur_idx
+        return pending_text, pending_ms, cur_sent_idx
     raw_text = "".join(seg.text for seg in segments).strip()
 
     if not raw_text:
-        return pending_text, pending_ms, cur_idx
+        return pending_text, pending_ms, cur_sent_idx
 
     combined = (pending_text + " " + raw_text).strip() if pending_text else raw_text
     combined_ms = pending_ms + utter_ms
@@ -244,8 +244,8 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
         print(f"Recognized: {combined}")
         ws.send({"type": "recognize", "text": combined})
 
-        start = clamp_idx(cur_idx - 1)
-        end = clamp_idx(cur_idx + 4)
+        start = clamp_idx(cur_sent_idx - 1)
+        end = clamp_idx(cur_sent_idx + 4)
         search_range = aligned_ko[start:end]
 
         if search_range:
@@ -253,14 +253,14 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
             idx = start + idx_rel
 
             if score >= SCRIPT_MATCH_THRESHOLD:
-                cur_idx = idx
+                cur_sent_idx = idx
                 tag = aligned_tag[idx]
                 en_line = aligned_en[idx]
                 next_line = aligned_en[idx + 1] if idx + 1 < len(aligned_en) else ""
                 print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
                 ws.send({
                     "type": "match",
-                    "idx": cur_idx,
+                    "idx": cur_sent_idx,
                     "tag": tag,
                     "line": en_line,
                     "ko": aligned_ko[idx],
@@ -278,7 +278,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_idx):
         pending_text, pending_ms = combined, combined_ms
         print(f"Buffering: chars={significant_len(pending_text)}, ms={pending_ms}")
 
-    return pending_text, pending_ms, cur_idx
+    return pending_text, pending_ms, cur_sent_idx
 
 # ================================
 # Helpers for paragraph tracking
@@ -289,13 +289,12 @@ def sent_idx_to_para_idx(sent_idx: int) -> int:
             return para_idx
     return 0
 
-def para_step(line_idx: int) -> int:
-    p_i = sent_idx_to_para_idx(line_idx)
-    if p_i >= len(para_ranges):
-        return 0
+def para_idx_to_sent_idx(para_idx: int) -> tuple[int, int]:
+    if para_idx < 0 or para_idx >= len(para_ranges):
+        raise IndexError("Paragraph index out of range")
     else:
-        start, end = para_ranges[p_i]
-        return end - start + 1
+        start, end = para_ranges[para_idx]
+        return start, end
 
 # ================================
 # Handle file upload (Operator)
@@ -325,16 +324,20 @@ def vad_loop(ws: WSBridge):
     silence_count = 0
 
     if aligned_en:
-        ws.send({"type": "para_match", "para_idx": sent_idx_to_para_idx(cur_sent_idx), "reloading": True})
+        ws.send({"type": "para_match", "para_idx": sent_idx_to_para_idx(cur_sent_idx), "sent_idx": cur_sent_idx, "reloading": True})
 
     while not should_stop():
         cmd = ws.get_cmd_nowait()
         if cmd:
             t = cmd.get("type")
             if t == "prev":
-                cur_sent_idx = max(0, cur_sent_idx - para_step(cur_sent_idx))
+                para_idx = sent_idx_to_para_idx(cur_sent_idx)
+                if para_idx > 0:
+                    cur_sent_idx, _ = para_idx_to_sent_idx(para_idx - 1)
             elif t == "next":
-                cur_sent_idx = min(TOTAL - 1, cur_sent_idx + para_step(cur_sent_idx))
+                para_idx = sent_idx_to_para_idx(cur_sent_idx)
+                if para_idx < len(para_ranges) - 1:
+                    cur_sent_idx, _ = para_idx_to_sent_idx(para_idx + 1)
             elif t == "load_files":
                 handle_uploaded_files(ws, cmd)
                 cur_sent_idx = 0
@@ -347,10 +350,11 @@ def vad_loop(ws: WSBridge):
         new_para_idx = sent_idx_to_para_idx(cur_sent_idx)
         if new_para_idx != last_sent_para_idx or (cmd and cmd.get("type") == "load_files"):
             last_sent_para_idx = new_para_idx
-            # broadcast paragraph update
+            base_sent_idx, _ = para_idx_to_sent_idx(last_sent_para_idx)
             ws.send({
                 "type": "para_match",
-                "para_idx": sent_idx_to_para_idx(cur_sent_idx),
+                "para_idx": last_sent_para_idx,
+                "sent_idx": cur_sent_idx - base_sent_idx,
                 "reloading": cmd and cmd.get("type") == "load_files",
             })
 

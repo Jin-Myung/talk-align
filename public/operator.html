@@ -262,6 +262,7 @@
           highlight(newIdx);
           addLog(`Matched paragraph ${newIdx + 1}`, true);
           lastMatchedParaIdx = newIdx;
+          lastSentenceId = d.sent_idx + 1;
           updatePosition(newIdx + 1, lastSentenceId);
         }
       }
