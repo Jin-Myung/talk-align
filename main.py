@@ -177,9 +177,6 @@ _sig_re = re.compile(r"[A-Za-z0-9\u3131-\u318E\uAC00-\uD7A3]")
 def significant_len(s: str) -> int:
     return len(_sig_re.findall(s))
 
-def clamp_idx(i: int) -> int:
-    return max(0, min(TOTAL - 1, i))
-
 # ================================
 # Dynamic script loader
 # ================================
@@ -244,8 +241,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
         print(f"Recognized: {combined}")
         ws.send({"type": "recognize", "text": combined})
 
-        start = clamp_idx(cur_sent_idx - 1)
-        end = clamp_idx(cur_sent_idx + 4)
+        start, end = get_search_range(cur_sent_idx)
         search_range = aligned_ko[start:end]
 
         if search_range:
@@ -295,6 +291,23 @@ def para_idx_to_sent_idx(para_idx: int) -> tuple[int, int]:
     else:
         start, end = para_ranges[para_idx]
         return start, end
+
+def get_search_range(cur_sent_idx: int) -> tuple[int, int]:
+    para_idx = sent_idx_to_para_idx(cur_sent_idx)
+    start, end = para_idx_to_sent_idx(para_idx)
+
+    # Expand search range by 1 paragraph before and 2 paragraphs after
+    if para_idx > 0:
+        prev_start, _ = para_idx_to_sent_idx(para_idx - 1)
+        start = prev_start
+    if para_idx < len(para_ranges) - 2:
+        _, next_end = para_idx_to_sent_idx(para_idx + 2)
+        end = next_end
+    elif para_idx < len(para_ranges) - 1:
+        _, next_end = para_idx_to_sent_idx(para_idx + 1)
+        end = next_end
+
+    return start, end
 
 # ================================
 # Handle file upload (Operator)
