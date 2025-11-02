@@ -222,7 +222,7 @@
 
 <!-- Recognized text -->
 <div class="status-panel">
-  <button id="btnMute" class="mute-btn" title="Mute microphone">🔇</button>
+  <button id="btnMute" class="mute-btn" title="Mute microphone">🎤</button>
   <span class="status-label">📍</span>
   <span id="position" class="status-value">-.-</span>
   <span class="status-label">💬</span>
@@ -397,7 +397,7 @@
     muted = !is_muted;
     btnMute.classList.toggle('active', muted);
     btnMute.title = muted ? "Unmute microphone" : "Mute microphone";
-    btnMute.textContent = muted ? "🔈" : "🔇";
+    btnMute.textContent = muted ? "🔇" : "🎤";
     if (muted) {
       recognized.textContent = "-";
     }
