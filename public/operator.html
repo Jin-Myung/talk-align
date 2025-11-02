@@ -128,12 +128,48 @@
     border-top: 1px solid #ccc;
     gap: 20px;
   }
-  button {
-    font-size: 15px;
-    padding: 8px 14px;
-    cursor: pointer;
-    transition: opacity 0.2s;
+
+  .move-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
+
+  .move-label {
+    color: #555;
+    font-weight: 400;
+  }
+
+  .jump-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #jumpInput {
+    font-size: 14px;
+    padding: 3px 6px;
+    width: 60px;
+    text-align: center;
+    border: 1px solid #aaa;
+    border-radius: 4px;
+    background: #fff;
+  }
+
+  button {
+    font-size: 14px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: opacity 0.2s, background 0.2s;
+    border: 1px solid #bbb;
+    border-radius: 4px;
+    background: #f9f9f9;
+  }
+
+  button:hover:not(:disabled) {
+    background: #ddd;
+  }
+
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -195,8 +231,16 @@
 
 <!-- Paragraph move buttons -->
 <div class="buttons">
-  <button id="btnPrev">▲</button>
-  <button id="btnNext">▼</button>
+  <div class="move-controls">
+    <label class="move-label">Move paragraph:</label>
+    <button id="btnPrev">▲</button>
+    <button id="btnNext">▼</button>
+  </div>
+  <div class="jump-controls">
+    <label for="jumpInput">Jump to:</label>
+    <input type="number" id="jumpInput" min="1" style="width:60px;text-align:center;">
+    <button id="btnJump">Go</button>
+  </div>
 </div>
 
 <!-- Log messages -->
@@ -215,6 +259,8 @@
   const recognized = document.getElementById('recognized');
   const btnPrev = document.getElementById('btnPrev');
   const btnNext = document.getElementById('btnNext');
+  const jumpInput = document.getElementById('jumpInput');
+  const btnJump = document.getElementById('btnJump');
   const log = document.getElementById('log');
 
   let connected = false;
@@ -310,7 +356,7 @@
     connected = ok;
     connStatus.textContent = ok ? '🟢 Connected' : '🔴 Disconnected';
     connStatus.style.color = ok ? "#070" : "#a00";
-    btnLoad.disabled = btnPrev.disabled = btnNext.disabled = !ok;
+    btnLoad.disabled = btnPrev.disabled = btnNext.disabled = jumpInput.disabled = btnJump.disabled = !ok;
     if (!ok) {
       position.textContent = "-.-";
       recognized.textContent = "-";
@@ -391,11 +437,15 @@
     buttonsLocked = true;
     btnPrev.disabled = true;
     btnNext.disabled = true;
+    jumpInput.disabled = true;
+    btnJump.disabled = true;
     clearTimeout(lockTimer);
     lockTimer = setTimeout(() => {
       buttonsLocked = false;
       btnPrev.disabled = false;
       btnNext.disabled = false;
+      jumpInput.disabled = false;
+      btnJump.disabled = false;
     }, durationMs);
   }
 
@@ -416,6 +466,14 @@
   btnMute.addEventListener('click', () => toggleMute(muted));
   btnPrev.addEventListener('click', () => handleMove('prev'));
   btnNext.addEventListener('click', () => handleMove('next'));
+  btnJump.addEventListener('click', () => {
+    const num = parseInt(jumpInput.value, 10);
+    if (isNaN(num) || num < 1) {
+      alert("Enter a valid paragraph number.");
+      return;
+    }
+    send({ type: "go_to_para", para_idx: num - 1 });
+  });
 
   document.addEventListener('keydown', (e) => {
     if (connected) {
