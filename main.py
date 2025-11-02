@@ -49,10 +49,10 @@ else:
 
 # ================================
 # Sentence splitter (language-agnostic, simple)
-# - splits on [.?!], keeps delimiters
+# - splits on [.?!,], keeps delimiters
 # - collapses spaces/newlines
 # ================================
-_sent_re = re.compile(r'([^.!?]*[.!?]["”\']?)')
+_sent_re = re.compile(r'([^.!?,]*[.!?,]["”\']?)')
 
 def split_sentences(text: str) -> List[str]:
     text = re.sub(r'\s+', ' ', text.strip())
@@ -333,7 +333,7 @@ def vad_loop(ws: WSBridge):
     pending_ms = 0
 
     speech_start_frames = 2  # 2 * FRAME_DURATION = 60ms to confirm speech start
-    silence_end_frames = 6   # 6 * FRAME_DURATION = 180ms to confirm end
+    silence_end_frames = 4   # 4 * FRAME_DURATION = 120ms to confirm end
     speech_count = 0
     silence_count = 0
 
