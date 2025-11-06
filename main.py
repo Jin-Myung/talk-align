@@ -49,10 +49,10 @@ else:
 
 # ================================
 # Sentence splitter (language-agnostic, simple)
-# - splits on [.?!,], keeps delimiters
+# - splits on [.?!], keeps delimiters
 # - collapses spaces/newlines
 # ================================
-_sent_re = re.compile(r'([^.!?,]*[.!?,]["”\']?)')
+_sent_re = re.compile(r'([^.!?]*[.!?]["”\']?)')
 
 def split_sentences(text: str) -> List[str]:
     text = re.sub(r'\s+', ' ', text.strip())
