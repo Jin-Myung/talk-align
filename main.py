@@ -1,5 +1,9 @@
+import warnings
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API", category=UserWarning)
+
 from faster_whisper import WhisperModel
 import gc
+import io
 import numpy as np
 import os
 import pyaudio
@@ -15,25 +19,13 @@ import webbrowser
 import webrtcvad
 from wsbridge import WSBridge
 
-# --- Windows console UTF-8 fix ---
+
+# Force utf-8 printing regardless of terminal code page in Windows
 if os.name == "nt":
-    try:
-        import ctypes
-        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
-    except Exception:
-        pass
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-os.environ["PYTHONMALLOC"] = "malloc"   # prevent double-free crash on macOS
-os.environ["TOKENIZERS_PARALLELISM"] = "false"  # suppress background pool warnings
-
-# ================================
 # Args
-# ================================
 ko_file = None
 en_file = None
 
