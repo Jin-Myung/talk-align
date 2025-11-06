@@ -276,7 +276,7 @@ def sent_idx_to_para_idx(sent_idx: int) -> int:
     for para_idx, (start, end) in enumerate(para_ranges):
         if start <= sent_idx <= end:
             return para_idx
-    return 0
+    raise IndexError("Sentence index out of range")
 
 def para_idx_to_sent_idx(para_idx: int) -> tuple[int, int]:
     if para_idx < 0 or para_idx >= len(para_ranges):
@@ -286,6 +286,8 @@ def para_idx_to_sent_idx(para_idx: int) -> tuple[int, int]:
         return start, end
 
 def get_search_range(cur_sent_idx: int) -> tuple[int, int]:
+    if cur_sent_idx < 0 or cur_sent_idx >= TOTAL:
+        raise IndexError("Sentence index out of range")
     para_idx = sent_idx_to_para_idx(cur_sent_idx)
     start, end = para_idx_to_sent_idx(para_idx)
 
@@ -329,7 +331,7 @@ def vad_loop(ws: WSBridge):
     speech_count = 0
     silence_count = 0
 
-    if aligned_en:
+    if aligned_ko:
         ws.send({"type": "move_para", "para_idx": sent_idx_to_para_idx(cur_sent_idx), "sent_idx": cur_sent_idx, "reloading": True})
 
     while not should_stop():
@@ -356,6 +358,10 @@ def vad_loop(ws: WSBridge):
                 global is_muted
                 is_muted = bool(cmd.get("value", False))
                 print(f"Mute {'ON' if is_muted else 'OFF'}")
+
+        if not aligned_ko:
+            time.sleep(0.1)
+            continue
 
         new_para_idx = sent_idx_to_para_idx(cur_sent_idx)
         if new_para_idx != last_sent_para_idx or (cmd and cmd.get("type") == "load_files"):
