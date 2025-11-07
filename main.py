@@ -8,7 +8,7 @@ import numpy as np
 import os
 import pyaudio
 import queue
-from rapidfuzz import process, fuzz
+from rapidfuzz import fuzz, process
 import re
 import signal
 import sys
@@ -39,11 +39,9 @@ else:
     print("Usage: python main.py <ko_script.txt> <en_script.txt>")
     sys.exit(1)
 
-# ================================
 # Sentence splitter (language-agnostic, simple)
 # - splits on [.?!], keeps delimiters
 # - collapses spaces/newlines
-# ================================
 _sent_re = re.compile(r'([^.!?]*[.!?]["”\']?)')
 
 def split_sentences(text: str) -> List[str]:
@@ -58,11 +56,9 @@ def split_sentences(text: str) -> List[str]:
         parts.append(tail)
     return parts
 
-# ================================
 # Paragraph parser
 # - Header lines before first "^\d+\." are ignored
 # - Returns dict: {para_no: ["sent1", "sent2", ...]}
-# ================================
 _para_start_re = re.compile(r'^\s*(\d+)\.\s*(.*)$')
 
 def parse_paragraphs_from_text(text: str) -> Dict[int, List[str]]:
@@ -102,9 +98,7 @@ def parse_paragraphs(path: str) -> Dict[int, List[str]]:
     with open(path, 'r', encoding='utf-8') as f:
         return parse_paragraphs_from_text(f.read())
 
-# ================================
 # Initialize model / audio / VAD
-# ================================
 model = WhisperModel("small", device="cpu", compute_type="int8")
 
 RATE = 16000
@@ -118,22 +112,17 @@ rt_audio_q = queue.Queue(maxsize=100)  # real-time audio frames
 
 is_muted = False
 
-# ---- graceful shutdown event ----
+# Graceful shutdown event
 stop_event = threading.Event()
 def should_stop() -> bool:
     return stop_event.is_set()
 
-# ================================
 # Thresholds
-# ================================
 MIN_UTTER_TEXT_LEN_FOR_MATCH = 6      # require at least 6 significant chars
 MIN_UTTER_LEN_IN_MS_FOR_MATCH = 1000  # and at least 1 sec of speech
 MAX_UTTER_LEN_IN_MS = 10000  # truncate utterance to 10 sec in case of no silence
 SCRIPT_MATCH_THRESHOLD = 70  # require at least 70% similarity
 
-# ================================
-# Audio capture thread
-# ================================
 pa = None
 stream = None
 
@@ -162,22 +151,20 @@ def audio_capture():
         except Exception:
             pass
 
-# ================================
 # Keep letters/digits/KO when counting significant chars
-# ================================
 _sig_re = re.compile(r"[A-Za-z0-9\u3131-\u318E\uAC00-\uD7A3]")
 def significant_len(s: str) -> int:
     return len(_sig_re.findall(s))
 
-# ================================
 # Dynamic script loader
-# ================================
-aligned_ko, aligned_en, aligned_tag = [], [], []
+aligned_ko, aligned_en, aligned_tag, aligned_en_idx = [], [], [], []
 aligned_ko_paras, aligned_en_paras, para_ranges = [], [], []
 TOTAL = 0
 
 def load_scripts_from_text(ws, ko_text: str, en_text: str):
-    global aligned_ko, aligned_en, aligned_tag, aligned_ko_paras, aligned_en_paras, para_ranges, TOTAL
+    global aligned_ko, aligned_en, aligned_tag, aligned_en_idx
+    global aligned_ko_paras, aligned_en_paras, para_ranges
+    global TOTAL
 
     ko_paras = parse_paragraphs_from_text(ko_text)
     en_paras = parse_paragraphs_from_text(en_text)
@@ -187,21 +174,44 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
         return
 
     common_ids = sorted(set(ko_paras.keys()) & set(en_paras.keys()))
-    aligned_ko, aligned_en, aligned_tag = [], [], []
+    aligned_ko, aligned_en, aligned_tag, aligned_en_idx = [], [], [], []
     aligned_ko_paras, aligned_en_paras, para_ranges = [], [], []
     line_counter = 0
 
     for pid in common_ids:
+        # Align sentences in each paragraph
         ko_sents, en_sents = ko_paras[pid], en_paras[pid]
-        n = min(len(ko_sents), len(en_sents))
+        len_ko_sent = len(ko_sents)
+        len_en_sent = len(en_sents)
         start = line_counter
-        for i in range(n):
-            aligned_ko.append(ko_sents[i])
-            aligned_en.append(en_sents[i])
-            aligned_tag.append(f"{pid}.{i+1}")
-            line_counter += 1
-        end = line_counter - 1
-        para_ranges.append((start, end))
+        if len_ko_sent == len_en_sent:
+            for i in range(len_ko_sent):
+                aligned_tag.append(f"{pid}.{i+1}")
+                aligned_en_idx.append(len(aligned_en))
+                aligned_en.append(en_sents[i])
+        elif len_ko_sent > len_en_sent:
+            step_size = len_ko_sent // len_en_sent
+            for i in range(len_ko_sent):
+                aligned_tag.append(f"{pid}.{i+1}")
+                aligned_en_idx.append(len(aligned_en) + min(len_en_sent-1, i//step_size))
+            aligned_en.extend(en_sents)
+        else:
+            step_size = len_en_sent // len_ko_sent
+            remainder = len_en_sent % len_ko_sent
+            merged_en_sent = []
+            merge_base = 0
+            for i in range(len_ko_sent):
+                take = step_size + (1 if remainder > 0 else 0)
+                remainder -= 1 if remainder > 0 else 0
+                merged_en_sent.append(" ".join(en_sents[merge_base:merge_base + take]))
+                merge_base += take
+                aligned_tag.append(f"{pid}.{i+1}")
+                aligned_en_idx.append(len(aligned_en) + i)
+            aligned_en.extend(merged_en_sent)
+
+        aligned_ko.extend(ko_sents)
+        line_counter += len_ko_sent
+        para_ranges.append((start, line_counter - 1))
         aligned_ko_paras.append(" ".join(ko_sents))
         aligned_en_paras.append(" ".join(en_sents))
 
@@ -209,9 +219,7 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
     ws.send({"type": "init_para", "ko": aligned_ko_paras, "en": aligned_en_paras})
     print(f"Loaded {len(common_ids)} paragraphs and {TOTAL} sentences")
 
-# ================================
 # Process utterance: STT + script alignment
-# ================================
 def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
     try:
         normalized = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
@@ -269,9 +277,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
 
     return pending_text, pending_ms, cur_sent_idx
 
-# ================================
 # Helpers for paragraph tracking
-# ================================
 def sent_idx_to_para_idx(sent_idx: int) -> int:
     for para_idx, (start, end) in enumerate(para_ranges):
         if start <= sent_idx <= end:
@@ -304,9 +310,7 @@ def get_search_range(cur_sent_idx: int) -> tuple[int, int]:
 
     return start, end
 
-# ================================
 # Handle file upload (Operator)
-# ================================
 def handle_uploaded_files(ws, cmd):
     ko_text = cmd.get("ko_text", "")
     en_text = cmd.get("en_text", "")
@@ -315,9 +319,7 @@ def handle_uploaded_files(ws, cmd):
         return
     load_scripts_from_text(ws, ko_text, en_text)
 
-# ================================
 # VAD + alignment loop
-# ================================
 def vad_loop(ws: WSBridge):
     cur_sent_idx = 0
     last_sent_para_idx = -1
@@ -428,9 +430,7 @@ def heartbeat_loop(ws):
             pass
         time.sleep(interval)
 
-# ================================
 # Shutdown handling
-# ================================
 def request_shutdown(*_):
     print("\nShutting down...")
     stop_event.set()
