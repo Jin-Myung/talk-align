@@ -49,13 +49,17 @@ $ uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
 4. Open another terminal and run Step 1 and 2.
-5. Run the program with a script file and a prompt file:
+5. Run the main program:
 ```
-$ python main.py input_kor.txt input_eng.txt
+$ python main.py
 ```
 
-6. Speak the lines from the script, and the corresponding part will be displayed.
-7. Ctrl+C to end the program safely.
+6. Open the operator webpage (http://localhost:8000/public/operator.html).
+7. Open the audience webpage (http://localhost:8000/public/audience.html).
+8. Load script (KO) and prompt (EN) files from the operator webpage.
+9. Speak the lines in the script, and the corresponding part will be highlighted in the audience webpage.
+10. Ctrl+C in the terminal to end the main program (main.py).
+11. You may leave the webserver running and webpages open for future runs. Close them if needed.
 
 ## Installation for Windows
 
@@ -99,10 +103,14 @@ $ uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
 4. Open another terminal and run Step 1 and 2.
-5. Run the program with a script file and a prompt file:
+5. Run the main program:
 ```
-$ python main.py input_kor.txt input_eng.txt
+$ python main.py
 ```
 
-6. Speak the lines from the script, and the corresponding part will be displayed.
-7. Ctrl+C to end the program safely.
+6. Open the operator webpage (http://localhost:8000/public/operator.html).
+7. Open the audience webpage (http://localhost:8000/public/audience.html).
+8. Load script (KO) and prompt (EN) files from the operator webpage.
+9. Speak the lines in the script, and the corresponding part will be highlighted in the audience webpage.
+10. Ctrl+C in the terminal to end the main program (main.py).
+11. You may leave the webserver running and webpages open for future runs. Close them if needed.
