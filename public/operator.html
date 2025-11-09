@@ -245,6 +245,7 @@
 <script>
   const ws = new WebSocket(`ws://${location.host}/ws`);
   const connStatus = document.getElementById('connStatus');
+  const btnMode = document.getElementById('btnMode');
   const fileKO = document.getElementById('fileKO');
   const fileEN = document.getElementById('fileEN');
   const btnLoad = document.getElementById('btnLoad');
@@ -265,8 +266,7 @@
   let lineScript = [];
   let linePrompt = [];
   let alignedPromptIdx = [];
-  let matchedParaIdx = -1;
-  let sentInParaIdx = "-";
+  let matchedLineIdx = -1;
   let muted = false;
   let buttonsLocked = false;
   let lockTimer = null;
@@ -308,20 +308,31 @@
         addLog(`Loaded ${d.ko.length} paragraphs and ${d.aligned_ko?.length || 0} sentences.`);
       }
       else if (d.type === 'move') {
-        const paraIdx = d.para_idx || 0;
-        if (paraIdx !== matchedParaIdx || d.reloading) {
-          highlight(paraIdx);
-          addLog(`Matched paragraph ${paraIdx + 1}`, true);
-          matchedParaIdx = paraIdx;
-          sentInParaIdx = d.sent_idx + 1;
-          updatePosition(paraIdx + 1, sentInParaIdx);
+        if (viewModeInPara) {
+          const paraIdx = d.para_idx || 0;
+          if (paraIdx !== matchedLineIdx || d.reloading) {
+            highlight(paraIdx);
+            addLog(`Moved to paragraph ${paraIdx + 1}`, true);
+            matchedLineIdx = paraIdx;
+            position.textContent = d.tag;
+          }
+        } else {
+          const sentIdx = d.script_idx || 0;
+          if (sentIdx !== matchedLineIdx || d.reloading) {
+            highlight(sentIdx);
+            addLog(`Moved to sentence ${sentIdx + 1}`, true);
+            matchedLineIdx = sentIdx;
+            position.textContent = `${sentIdx+1}`;
+          }
         }
       }
       else if (d.type === 'match') {
-        if (d.tag) {
-          sentInParaIdx = d.tag.split('.')[1] || "-";
-          const paraIdx = cur_para_idx_from_tag(d.tag);
-          updatePosition(paraIdx + 1, sentInParaIdx);
+        if (viewModeInPara) {
+          if (d.tag) {
+            position.textContent = d.tag;
+          }
+        } else {
+          position.textContent = `${(d.script_idx ?? 0) + 1}`;
         }
       }
       else if (d.type === 'info') {
@@ -356,10 +367,6 @@
     send({type: "load_files", ko_text: koText, en_text: enText, view_mode_in_para: viewModeInPara});
     addLog(`Sent files to server: ${koFile.name}, ${enFile.name}`);
   });
-
-  function updatePosition(paraNum, sentNum){
-    position.textContent = `${paraNum}.${sentNum || "-"}`;
-  }
 
   function setConnectionState(ok) {
     connected = ok;
@@ -470,6 +477,7 @@
   function lockButtons(durationMs = 1000) {
     if (buttonsLocked) return;
     buttonsLocked = true;
+    btnMode.disabled = true;
     btnPrev.disabled = true;
     btnNext.disabled = true;
     jumpInput.disabled = true;
@@ -477,6 +485,7 @@
     clearTimeout(lockTimer);
     lockTimer = setTimeout(() => {
       buttonsLocked = false;
+      btnMode.disabled = false;
       btnPrev.disabled = false;
       btnNext.disabled = false;
       jumpInput.disabled = false;

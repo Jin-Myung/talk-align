@@ -329,6 +329,8 @@ def handle_uploaded_files(ws, cmd):
 
 # VAD + alignment loop
 def vad_loop(ws: WSBridge):
+    global view_mode_in_para
+
     cur_sent_idx = 0
     last_sent_idx = -1
     last_sent_para_idx = -1
@@ -349,6 +351,7 @@ def vad_loop(ws: WSBridge):
             "sent_idx_in_para": 0,
             "script_idx": 0,
             "prompt_idx": aligned_en_idx[0] if aligned_en_idx else 0,
+            "tag": aligned_tag[0] if aligned_tag else "",
             "reloading": True
         })
 
@@ -358,13 +361,21 @@ def vad_loop(ws: WSBridge):
         if cmd:
             t = cmd.get("type")
             if t == "prev":
-                para_idx = sent_idx_to_para_idx(cur_sent_idx)
-                if para_idx > 0:
-                    cur_sent_idx, _ = para_idx_to_sent_idx(para_idx - 1)
+                if view_mode_in_para:
+                    para_idx = sent_idx_to_para_idx(cur_sent_idx)
+                    if para_idx > 0:
+                        cur_sent_idx, _ = para_idx_to_sent_idx(para_idx - 1)
+                else:
+                    if cur_sent_idx > 0:
+                        cur_sent_idx -= 1
             elif t == "next":
-                para_idx = sent_idx_to_para_idx(cur_sent_idx)
-                if para_idx < len(para_ranges) - 1:
-                    cur_sent_idx, _ = para_idx_to_sent_idx(para_idx + 1)
+                if view_mode_in_para:
+                    para_idx = sent_idx_to_para_idx(cur_sent_idx)
+                    if para_idx < len(para_ranges) - 1:
+                        cur_sent_idx, _ = para_idx_to_sent_idx(para_idx + 1)
+                else:
+                    if cur_sent_idx < TOTAL - 1:
+                        cur_sent_idx += 1
             elif t == "go_to":
                 para_idx = cmd.get("para_idx", 0)
                 if para_idx >= 0 and para_idx < len(para_ranges):
@@ -378,7 +389,6 @@ def vad_loop(ws: WSBridge):
                 is_muted = bool(cmd.get("value", False))
                 print(f"Mute {'ON' if is_muted else 'OFF'}")
             elif t == "change_view_mode":
-                global view_mode_in_para
                 view_mode_in_para = bool(cmd.get("view_mode_in_para", False))
                 cur_sent_idx = 0
                 last_sent_para_idx = -1
@@ -399,6 +409,7 @@ def vad_loop(ws: WSBridge):
                 "sent_idx_in_para": cur_sent_idx - base_sent_idx,
                 "script_idx": cur_sent_idx,
                 "prompt_idx": aligned_en_idx[cur_sent_idx],
+                "tag": aligned_tag[cur_sent_idx],
                 "reloading": t == "change_view_mode" or t == "load_files",
             })
         elif cur_sent_idx != last_sent_idx:
@@ -409,6 +420,7 @@ def vad_loop(ws: WSBridge):
                 "sent_idx_in_para": cur_sent_idx - base_sent_idx,
                 "script_idx": cur_sent_idx,
                 "prompt_idx": aligned_en_idx[cur_sent_idx],
+                "tag": aligned_tag[cur_sent_idx],
                 "reloading": False,
             })
 
