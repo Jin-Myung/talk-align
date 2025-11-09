@@ -377,9 +377,14 @@ def vad_loop(ws: WSBridge):
                     if cur_sent_idx < TOTAL - 1:
                         cur_sent_idx += 1
             elif t == "go_to":
-                para_idx = cmd.get("para_idx", 0)
-                if para_idx >= 0 and para_idx < len(para_ranges):
-                    cur_sent_idx, _ = para_idx_to_sent_idx(para_idx)
+                if view_mode_in_para:
+                    para_idx = cmd.get("idx", 0)
+                    if para_idx >= 0 and para_idx < len(para_ranges):
+                        cur_sent_idx, _ = para_idx_to_sent_idx(para_idx)
+                else:
+                    script_idx = cmd.get("idx", 0)
+                    if script_idx >= 0 and script_idx < TOTAL:
+                        cur_sent_idx = script_idx
             elif t == "load_files":
                 handle_uploaded_files(ws, cmd)
                 cur_sent_idx = 0
