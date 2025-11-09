@@ -251,7 +251,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
         ws.send({"type": "info", "msg": f"recognized: {combined}"})
 
         start, end = get_search_range(cur_sent_idx)
-        search_range = aligned_ko[start:end]
+        search_range = aligned_ko[start:end+1]
 
         if search_range:
             match, score, idx_rel = process.extractOne(combined, search_range, scorer=fuzz.partial_ratio)
@@ -302,17 +302,15 @@ def get_search_range(cur_sent_idx: int) -> tuple[int, int]:
     para_idx = sent_idx_to_para_idx(cur_sent_idx)
     start, end = para_idx_to_sent_idx(para_idx)
 
-    # Expand search range by 1 paragraph before and 2 paragraphs after
+    # Expand search range by 1 paragraph before and 1 paragraphs after
     if para_idx > 0:
         prev_start, _ = para_idx_to_sent_idx(para_idx - 1)
         start = prev_start
-    if para_idx < len(para_ranges) - 2:
-        _, next_end = para_idx_to_sent_idx(para_idx + 2)
-        end = next_end
-    elif para_idx < len(para_ranges) - 1:
+    if para_idx < len(para_ranges) - 1:
         _, next_end = para_idx_to_sent_idx(para_idx + 1)
         end = next_end
 
+    print(f"Search range: sentences {start} to {end}")
     return start, end
 
 # Handle file upload (Operator)
@@ -398,6 +396,15 @@ def vad_loop(ws: WSBridge):
                 cur_sent_idx = 0
                 last_sent_para_idx = -1
                 print(f"View in {'paragraph' if view_mode_in_para else 'sentence'}")
+                ws.send({
+                    "type": "update_texts",
+                    "ko": aligned_ko_paras,
+                    "en": aligned_en_paras,
+                    "aligned_ko": aligned_ko,
+                    "aligned_en": aligned_en,
+                    "aligned_en_idx": aligned_en_idx,
+                    "view_mode_in_para": view_mode_in_para
+                })
 
         if not aligned_ko:
             time.sleep(0.1)

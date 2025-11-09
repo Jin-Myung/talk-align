@@ -65,8 +65,8 @@
   .panel:last-child { border-right: none; }
 
   .para {
-    padding: 8px 10px;
-    margin-bottom: 10px;
+    padding: 4px 5px;
+    margin-bottom: 5px;
     border-radius: 6px;
     transition: background 0.25s;
     display: flex;
@@ -351,8 +351,11 @@
     viewModeInPara = viewModeInPara ? false : true;
     btnMode.classList.toggle('active', viewModeInPara);
     btnMode.title = viewModeInPara ? 'Switch to sentence view' : 'Switch to paragraph view';
+    koPanel.innerHTML = '<div style="color:#888">Loading...</div>';
+    enPanel.innerHTML = '<div style="color:#888">Loading...</div>';
+    lockButtons();
     send({type: "change_view_mode", view_mode_in_para: viewModeInPara});
-    renderPanels();
+    matchedLineIdx = -1;
   });
 
   btnLoad.addEventListener('click', async () => {
