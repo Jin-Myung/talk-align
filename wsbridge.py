@@ -25,7 +25,10 @@ class WSBridge:
         with self.lock:
             try:
                 self.ws.send(json.dumps(payload, ensure_ascii=False))
-            except WebSocketConnectionClosedException:
+            except (WebSocketConnectionClosedException, ConnectionAbortedError, BrokenPipeError):
+                pass
+            except Exception:
+                # TODO: log error
                 pass
 
     def get_cmd(self, timeout=None):
