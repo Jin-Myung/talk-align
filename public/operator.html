@@ -274,8 +274,8 @@
   let lastAlive = Date.now();
   let paragraphsKO = [];
   let paragraphsEN = [];
-  let lastMatchedParaIdx = -1;
-  let lastSentenceId = "-";
+  let matchedParaIdx = -1;
+  let sentInParaIdx = "-";
   let muted = false;
   let buttonsLocked = false;
   let lockTimer = null;
@@ -303,31 +303,27 @@
           addLog("Reconnected to server.");
         }
       }
-      else if (d.type === 'init_para') {
+      else if (d.type === 'update_texts') {
         paragraphsKO = d.ko || [];
         paragraphsEN = d.en || [];
         renderPanels();
         addLog(`Loaded ${paragraphsKO.length} paragraphs`);
       }
-      else if (d.type === 'move_para') {
-        const newIdx = d.para_idx || 0;
-        if (newIdx !== lastMatchedParaIdx || d.reloading) {
-          highlight(newIdx);
-          addLog(`Matched paragraph ${newIdx + 1}`, true);
-          lastMatchedParaIdx = newIdx;
-          lastSentenceId = d.sent_idx + 1;
-          updatePosition(newIdx + 1, lastSentenceId);
+      else if (d.type === 'move') {
+        const paraIdx = d.para_idx || 0;
+        if (paraIdx !== matchedParaIdx || d.reloading) {
+          highlight(paraIdx);
+          addLog(`Matched paragraph ${paraIdx + 1}`, true);
+          matchedParaIdx = paraIdx;
+          sentInParaIdx = d.sent_idx + 1;
+          updatePosition(paraIdx + 1, sentInParaIdx);
         }
       }
-      else if (d.type === 'recognize') {
-        recognized.textContent = d.text;
-        addLog(`Recognized: ${d.text}`);
-      }
-      else if (d.type === 'match_sent') {
+      else if (d.type === 'match') {
         if (d.tag) {
-          lastSentenceId = d.tag.split('.')[1] || "-";
+          sentInParaIdx = d.tag.split('.')[1] || "-";
           const paraIdx = cur_para_idx_from_tag(d.tag);
-          updatePosition(paraIdx + 1, lastSentenceId);
+          updatePosition(paraIdx + 1, sentInParaIdx);
         }
       }
       else if (d.type === 'info') {
@@ -418,7 +414,7 @@
     send({ type: 'mute', value: muted });
   }
 
-  function addLog(msg, isMatch=false){
+  function addLog(msg, highlight=false){
     const nearBottom =
             Math.abs(log.scrollHeight - log.scrollTop - log.clientHeight) < 5;
 
@@ -429,7 +425,7 @@
     t.textContent = `[${new Date().toLocaleTimeString('en-US', {hour12:false})}]`;
     const m = document.createElement('span');
     m.className = 'log-text';
-    if (isMatch) m.classList.add('log-match');
+    if (highlight) m.classList.add('log-match');
     m.textContent = msg;
     line.appendChild(t);
     line.appendChild(m);
@@ -486,7 +482,7 @@
       alert("Enter a valid paragraph number.");
       return;
     }
-    send({ type: "go_to_para", para_idx: num - 1 });
+    send({ type: "go_to", para_idx: num - 1 });
   });
 
   document.addEventListener('keydown', (e) => {

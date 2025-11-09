@@ -216,7 +216,7 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
         aligned_en_paras.append(" ".join(en_sents))
 
     TOTAL = len(aligned_ko)
-    ws.send({"type": "init_para", "ko": aligned_ko_paras, "en": aligned_en_paras})
+    ws.send({"type": "update_texts", "ko": aligned_ko_paras, "en": aligned_en_paras})
     print(f"Loaded {len(common_ids)} paragraphs and {TOTAL} sentences")
 
 # Process utterance: STT + script alignment
@@ -239,7 +239,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
 
     if significant_len(combined) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
         print(f"Recognized: {combined}")
-        ws.send({"type": "recognize", "text": combined})
+        ws.send({"type": "info", "msg": f"recognized: {combined}"})
 
         start, end = get_search_range(cur_sent_idx)
         search_range = aligned_ko[start:end]
@@ -256,13 +256,10 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
                 next_line = aligned_en[idx + 1] if idx + 1 < len(aligned_en) else ""
                 print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
                 ws.send({
-                    "type": "match_sent",
-                    "idx": cur_sent_idx,
+                    "type": "match",
+                    "script_idx": cur_sent_idx,
+                    "prompt_idx": aligned_en_idx[cur_sent_idx],
                     "tag": tag,
-                    "line": en_line,
-                    "ko": aligned_ko[idx],
-                    "score": round(score, 1),
-                    "next": next_line,
                 })
             else:
                 print(f"No matching script (similarity {score:.3f}%)")
@@ -333,8 +330,15 @@ def vad_loop(ws: WSBridge):
     speech_count = 0
     silence_count = 0
 
-    if aligned_ko:
-        ws.send({"type": "move_para", "para_idx": sent_idx_to_para_idx(cur_sent_idx), "sent_idx": cur_sent_idx, "reloading": True})
+    if aligned_ko and para_ranges:
+        ws.send({
+            "type": "move",
+            "para_idx": sent_idx_to_para_idx(0),
+            "sent_idx_in_para": 0,
+            "script_idx": 0,
+            "prompt_idx": aligned_en_idx[0] if aligned_en_idx else 0,
+            "reloading": True
+        })
 
     while not should_stop():
         cmd = ws.get_cmd_nowait()
@@ -348,7 +352,7 @@ def vad_loop(ws: WSBridge):
                 para_idx = sent_idx_to_para_idx(cur_sent_idx)
                 if para_idx < len(para_ranges) - 1:
                     cur_sent_idx, _ = para_idx_to_sent_idx(para_idx + 1)
-            elif t == "go_to_para":
+            elif t == "go_to":
                 para_idx = cmd.get("para_idx", 0)
                 if para_idx >= 0 and para_idx < len(para_ranges):
                     cur_sent_idx, _ = para_idx_to_sent_idx(para_idx)
@@ -370,9 +374,11 @@ def vad_loop(ws: WSBridge):
             last_sent_para_idx = new_para_idx
             base_sent_idx, _ = para_idx_to_sent_idx(last_sent_para_idx)
             ws.send({
-                "type": "move_para",
+                "type": "move",
                 "para_idx": last_sent_para_idx,
-                "sent_idx": cur_sent_idx - base_sent_idx,
+                "sent_idx_in_para": cur_sent_idx - base_sent_idx,
+                "script_idx": cur_sent_idx,
+                "prompt_idx": aligned_en_idx[cur_sent_idx],
                 "reloading": cmd and cmd.get("type") == "load_files",
             })
 
@@ -499,7 +505,7 @@ if ko_file and en_file:
         load_scripts_from_text(ws, f1.read(), f2.read())
 else:
     print("No initial files — will wait for Operator to upload.")
-    ws.send({"type": "init_para", "ko": [], "en": []})
+    ws.send({"type": "update_texts", "ko": [], "en": []})
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
