@@ -375,7 +375,7 @@
     connected = ok;
     connStatus.textContent = ok ? '🟢 Connected' : '🔴 Disconnected';
     connStatus.style.color = ok ? "#070" : "#a00";
-    btnLoad.disabled = btnPrev.disabled = btnNext.disabled = jumpInput.disabled = btnJump.disabled = !ok;
+    btnMode.disabled = btnLoad.disabled = btnPrev.disabled = btnNext.disabled = jumpInput.disabled = btnJump.disabled = !ok;
     if (!ok) {
       position.textContent = "-.-";
       recognized.textContent = "-";
@@ -402,7 +402,7 @@
         const p2 = document.createElement('div');
         p2.className = 'para';
         p2.id = `en-p${i}`;
-        p2.innerHTML = `<span class="pnum">${i + 1}.</span><span>${promptText}</span>`;
+        p2.innerHTML = `<span>${promptText}</span>`;
         enPanel.appendChild(p2);
       }
     } else {
@@ -418,7 +418,7 @@
         const p2 = document.createElement('div');
         p2.className = 'para';
         p2.id = `en-s${j}`;
-        p2.innerHTML = `<span class="pnum">${j + 1}.</span><span>${linePrompt[j]}</span>`;
+        p2.innerHTML = `<span>${linePrompt[j]}</span>`;
         enPanel.appendChild(p2);
       }
     }
