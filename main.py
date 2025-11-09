@@ -221,6 +221,7 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
         "type": "update_texts",
         "ko": aligned_ko_paras,
         "en": aligned_en_paras,
+        "aligned_en": aligned_en,
         "view_mode_in_para": view_mode_in_para
     })
     print(f"Loaded {len(common_ids)} paragraphs and {TOTAL} sentences")
@@ -259,7 +260,6 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
                 cur_sent_idx = idx
                 tag = aligned_tag[idx]
                 en_line = aligned_en[idx]
-                next_line = aligned_en[idx + 1] if idx + 1 < len(aligned_en) else ""
                 print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
                 ws.send({
                     "type": "match",
@@ -328,6 +328,7 @@ def handle_uploaded_files(ws, cmd):
 # VAD + alignment loop
 def vad_loop(ws: WSBridge):
     cur_sent_idx = 0
+    last_sent_idx = -1
     last_sent_para_idx = -1
     utter = []
     in_utter = False
@@ -351,6 +352,7 @@ def vad_loop(ws: WSBridge):
 
     while not should_stop():
         cmd = ws.get_cmd_nowait()
+        t = ""
         if cmd:
             t = cmd.get("type")
             if t == "prev":
@@ -375,26 +377,37 @@ def vad_loop(ws: WSBridge):
                 print(f"Mute {'ON' if is_muted else 'OFF'}")
             elif t == "change_view_mode":
                 global view_mode_in_para
-                view_mode_in_para = bool(cmd.get("value", False))
-                # this would broadcast move msg to audience page
+                view_mode_in_para = bool(cmd.get("view_mode_in_para", False))
                 cur_sent_idx = 0
                 last_sent_para_idx = -1
+                print(f"View in {'paragraph' if view_mode_in_para else 'sentence'}")
 
         if not aligned_ko:
             time.sleep(0.1)
             continue
 
-        new_para_idx = sent_idx_to_para_idx(cur_sent_idx)
-        if new_para_idx != last_sent_para_idx or (cmd and cmd.get("type") == "load_files"):
-            last_sent_para_idx = new_para_idx
-            base_sent_idx, _ = para_idx_to_sent_idx(last_sent_para_idx)
+        para_idx = sent_idx_to_para_idx(cur_sent_idx)
+        base_sent_idx, _ = para_idx_to_sent_idx(para_idx)
+        if para_idx != last_sent_para_idx or t == "change_view_mode" or t == "load_files":
+            last_sent_para_idx = para_idx
+            last_sent_idx = cur_sent_idx
             ws.send({
                 "type": "move",
-                "para_idx": last_sent_para_idx,
+                "para_idx": para_idx,
                 "sent_idx_in_para": cur_sent_idx - base_sent_idx,
                 "script_idx": cur_sent_idx,
                 "prompt_idx": aligned_en_idx[cur_sent_idx],
-                "reloading": cmd and (cmd.get("type") == "change_view_mode" or cmd.get("type") == "load_files"),
+                "reloading": t == "change_view_mode" or t == "load_files",
+            })
+        elif cur_sent_idx != last_sent_idx:
+            last_sent_idx = cur_sent_idx
+            ws.send({
+                "type": "move",
+                "para_idx": para_idx,
+                "sent_idx_in_para": cur_sent_idx - base_sent_idx,
+                "script_idx": cur_sent_idx,
+                "prompt_idx": aligned_en_idx[cur_sent_idx],
+                "reloading": False,
             })
 
         try:
@@ -520,7 +533,7 @@ if ko_file and en_file:
         load_scripts_from_text(ws, f1.read(), f2.read())
 else:
     print("No initial files — will wait for Operator to upload.")
-    ws.send({"type": "update_texts", "ko": [], "en": [], "view_mode_in_para": view_mode_in_para})
+    ws.send({"type": "update_texts", "ko": [], "en": [], "aligned_en": [], "view_mode_in_para": view_mode_in_para})
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)

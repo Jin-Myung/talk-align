@@ -11,7 +11,7 @@
     }
 
     .para {
-        margin-bottom: 0.4em;
+        margin-bottom: 0.2em;
         padding: 0.2em 0.4em;
         border-radius: 8px;
         transition: background 0.4s, color 0.4s, transform 0.2s ease;
@@ -41,6 +41,7 @@
 
     let paragraphs = [];
     let currentIdx = -1;
+    let viewModeInPara = false;
 
     ws.onmessage = (e) => {
         try {
@@ -48,13 +49,21 @@
 
             if (d.type === 'update_texts') {
                 container.innerHTML = '';
-                paragraphs = d.en || [];
+                viewModeInPara = d.view_mode_in_para || false;
+                if (viewModeInPara)
+                    paragraphs = d.en || [];
+                else
+                    paragraphs = d.aligned_en || [];
                 renderParagraphs();
                 if (paragraphs.length > 0) highlight(0);
             }
 
             if (d.type === 'move') {
-                const idx = d.para_idx || 0;
+                let idx;
+                if (viewModeInPara)
+                    idx = d.para_idx || 0;
+                else
+                    idx = d.prompt_idx || 0;
                 if (idx === currentIdx) return;
                 highlight(idx);
             }
