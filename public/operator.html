@@ -269,7 +269,7 @@
   const btnJump = document.getElementById('btnJump');
   const log = document.getElementById('log');
 
-  let viewModeSent = true;
+  let viewModeInPara = false;
   let connected = false;
   let lastAlive = Date.now();
   let paragraphsKO = [];
@@ -339,9 +339,10 @@
   }
 
   btnMode.addEventListener('click', () => {
-    viewModeSent = viewModeSent ? false : true;
-    btnMode.classList.toggle('active', viewModeSent);
-    btnMode.title = viewModeSent ? 'Switch to paragraph view' : 'Switch to sentence view';
+    viewModeInPara = viewModeInPara ? false : true;
+    btnMode.classList.toggle('active', viewModeInPara);
+    btnMode.title = viewModeInPara ? 'Switch to sentence view' : 'Switch to paragraph view';
+    send({type: "change_view_mode", view_mode_in_para: viewModeInPara});
     renderPanels();
   });
 
@@ -354,7 +355,7 @@
     }
     const koText = await koFile.text();
     const enText = await enFile.text();
-    send({type: "load_files", ko_text: koText, en_text: enText});
+    send({type: "load_files", ko_text: koText, en_text: enText, view_mode_in_para: viewModeInPara});
     addLog(`Sent files to server: ${koFile.name}, ${enFile.name}`);
   });
 
