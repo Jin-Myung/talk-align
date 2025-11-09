@@ -221,7 +221,9 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
         "type": "update_texts",
         "ko": aligned_ko_paras,
         "en": aligned_en_paras,
+        "aligned_ko": aligned_ko,
         "aligned_en": aligned_en,
+        "aligned_en_idx": aligned_en_idx,
         "view_mode_in_para": view_mode_in_para
     })
     print(f"Loaded {len(common_ids)} paragraphs and {TOTAL} sentences")

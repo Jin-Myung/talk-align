@@ -11,14 +11,6 @@
     height: 100vh;
   }
 
-  header {
-    background: #333;
-    color: #fff;
-    padding: 10px 16px;
-    font-size: 18px;
-    font-weight: 600;
-  }
-
   .file-loader {
     background: #eee;
     padding: 8px 10px;
@@ -207,8 +199,6 @@
   .log-match { color: #007a00; font-weight: 600; }
 </style>
 
-<header>Talk-Align Console</header>
-
 <!-- File upload banner -->
 <div class="file-loader">
   <button id="btnMode" class="mode-btn" title="Switch to paragraph view">🧩</button>
@@ -238,7 +228,7 @@
 <!-- Paragraph move buttons -->
 <div class="buttons">
   <div class="move-controls">
-    <label class="move-label">Move paragraph:</label>
+    <label class="move-label">Move up/down:</label>
     <button id="btnPrev">▲</button>
     <button id="btnNext">▼</button>
   </div>
@@ -272,8 +262,9 @@
   let viewModeInPara = false;
   let connected = false;
   let lastAlive = Date.now();
-  let paragraphsKO = [];
-  let paragraphsEN = [];
+  let lineScript = [];
+  let linePrompt = [];
+  let alignedPromptIdx = [];
   let matchedParaIdx = -1;
   let sentInParaIdx = "-";
   let muted = false;
@@ -304,10 +295,17 @@
         }
       }
       else if (d.type === 'update_texts') {
-        paragraphsKO = d.ko || [];
-        paragraphsEN = d.en || [];
+        viewModeInPara = d.view_mode_in_para || false;
+        if (viewModeInPara) {
+          lineScript = d.ko || [];
+          linePrompt = d.en || [];
+        } else {
+          lineScript = d.aligned_ko || [];
+          linePrompt = d.aligned_en || [];
+          alignedPromptIdx = d.aligned_en_idx || [];
+        }
         renderPanels();
-        addLog(`Loaded ${paragraphsKO.length} paragraphs`);
+        addLog(`Loaded ${d.ko.length} paragraphs and ${d.aligned_ko?.length || 0} sentences.`);
       }
       else if (d.type === 'move') {
         const paraIdx = d.para_idx || 0;
@@ -375,33 +373,59 @@
     toggleMute(ok);
   }
 
-  function renderPanels(){
+  function renderPanels() {
     koPanel.innerHTML = '';
     enPanel.innerHTML = '';
-    for (let i = 0; i < paragraphsKO.length; i++){
-      const p1 = document.createElement('div');
-      p1.className = 'para';
-      p1.id = `ko-p${i}`;
-      p1.innerHTML = `<span class="pnum">${i+1}.</span><span>${paragraphsKO[i]}</span>`;
-      koPanel.appendChild(p1);
 
-      const p2 = document.createElement('div');
-      p2.className = 'para';
-      p2.id = `en-p${i}`;
-      p2.innerHTML = `<span class="pnum">${i+1}.</span><span>${paragraphsEN[i]}</span>`;
-      enPanel.appendChild(p2);
+    if (viewModeInPara) {
+      const len = Math.max(lineScript.length, linePrompt.length);
+      for (let i = 0; i < len; i++) {
+        const scriptText = lineScript[i] || '';
+        const promptText = linePrompt[i] || '';
+
+        const p1 = document.createElement('div');
+        p1.className = 'para';
+        p1.id = `ko-p${i}`;
+        p1.innerHTML = `<span class="pnum">${i + 1}.</span><span>${scriptText}</span>`;
+        koPanel.appendChild(p1);
+
+        const p2 = document.createElement('div');
+        p2.className = 'para';
+        p2.id = `en-p${i}`;
+        p2.innerHTML = `<span class="pnum">${i + 1}.</span><span>${promptText}</span>`;
+        enPanel.appendChild(p2);
+      }
+    } else {
+      for (let i = 0; i < lineScript.length; i++) {
+        const p1 = document.createElement('div');
+        p1.className = 'para';
+        p1.id = `ko-s${i}`;
+        p1.innerHTML = `<span class="pnum">${i + 1}.</span><span>${lineScript[i]}</span>`;
+        koPanel.appendChild(p1);
+      }
+
+      for (let j = 0; j < linePrompt.length; j++) {
+        const p2 = document.createElement('div');
+        p2.className = 'para';
+        p2.id = `en-s${j}`;
+        p2.innerHTML = `<span class="pnum">${j + 1}.</span><span>${linePrompt[j]}</span>`;
+        enPanel.appendChild(p2);
+      }
     }
   }
 
-  function highlight(idx){
+  function highlight(idx) {
     const allKO = koPanel.querySelectorAll('.para');
     const allEN = enPanel.querySelectorAll('.para');
-    allKO.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
-    allEN.forEach((el,i)=>el.classList.toggle('highlight', i===idx));
-    const activeKO = document.getElementById(`ko-p${idx}`);
-    const activeEN = document.getElementById(`en-p${idx}`);
-    if (activeKO) activeKO.scrollIntoView({behavior:'smooth', block:'center'});
-    if (activeEN) activeEN.scrollIntoView({behavior:'smooth', block:'center'});
+
+    allKO.forEach((el, i) => el.classList.toggle('highlight', i === idx));
+    const enIdx = alignedPromptIdx[idx] ?? -1;
+    allEN.forEach((el, i) => el.classList.toggle('highlight', i === enIdx));
+
+    const activeKO = allKO[idx];
+    const activeEN = allEN[enIdx];
+    if (activeKO) activeKO.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (activeEN) activeEN.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   function toggleMute(is_muted=true){
