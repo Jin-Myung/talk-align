@@ -21,7 +21,7 @@ from wsbridge import WSBridge
 
 
 # Force utf-8 printing regardless of terminal code page in Windows
-if os.name == "nt":
+if os.name == "nt" and not os.environ.get("MSYSTEM"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
@@ -295,7 +295,6 @@ def process_utterance(ws, utter, pending_text, pending_ms, sent_idx):
     combined_ms = pending_ms + utter_ms
 
     if significant_len(combined) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
-        print(f"Recognized: {combined}")
         ws.send({"type": "info", "msg": f"recognized: {combined}"})
 
         start, end = get_search_range(sent_idx)
@@ -358,7 +357,6 @@ def get_search_range(sent_idx: int) -> tuple[int, int]:
         _, next_end = para_idx_to_sent_idx(para_idx + 1)
         end = next_end
 
-    print(f"Search range: sentences {start} to {end}")
     return start, end
 
 # Handle file upload (Operator)

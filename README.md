@@ -105,7 +105,7 @@ $ uvicorn server:app --host 0.0.0.0 --port 8000
 4. Open another terminal and run Step 1 and 2.
 5. Run the main program:
 ```
-$ python main.py
+$ python -u main.py
 ```
 
 6. Open the operator webpage (http://localhost:8000/public/operator.html).
