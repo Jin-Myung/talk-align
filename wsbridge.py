@@ -28,6 +28,9 @@ class WSBridge:
             except WebSocketConnectionClosedException:
                 pass
 
+    def get_cmd(self, timeout=None):
+        return self.cmd_q.get(timeout=timeout)
+
     def get_cmd_nowait(self):
         try:
             return self.cmd_q.get_nowait()

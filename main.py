@@ -229,7 +229,7 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
     print(f"Loaded {len(common_ids)} paragraphs and {TOTAL} sentences")
 
 # Process utterance: STT + script alignment
-def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
+def process_utterance(ws, utter, pending_text, pending_ms, sent_idx):
     try:
         normalized = np.frombuffer(b"".join(utter), np.int16).astype(np.float32) / 32768.0
         utter_ms = int(len(normalized) / RATE * 1000)
@@ -237,11 +237,11 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
     except Exception as e:
         print("STT error:", e)
         ws.send({"type": "info", "msg": f"STT error: {e}"})
-        return pending_text, pending_ms, cur_sent_idx
+        return pending_text, pending_ms, sent_idx
     raw_text = "".join(seg.text for seg in segments).strip()
 
     if not raw_text:
-        return pending_text, pending_ms, cur_sent_idx
+        return pending_text, pending_ms, sent_idx
 
     combined = (pending_text + " " + raw_text).strip() if pending_text else raw_text
     combined_ms = pending_ms + utter_ms
@@ -250,7 +250,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
         print(f"Recognized: {combined}")
         ws.send({"type": "info", "msg": f"recognized: {combined}"})
 
-        start, end = get_search_range(cur_sent_idx)
+        start, end = get_search_range(sent_idx)
         search_range = aligned_ko[start:end+1]
 
         if search_range:
@@ -259,14 +259,14 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
 
             if score >= SCRIPT_MATCH_THRESHOLD:
                 idx = min(idx + 1, TOTAL - 1) # highlight next sentence while recognizing current sentence
-                cur_sent_idx = idx
+                sent_idx = idx
                 tag = aligned_tag[idx]
                 en_line = aligned_en[idx]
                 print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
                 ws.send({
                     "type": "match",
-                    "script_idx": cur_sent_idx,
-                    "prompt_idx": aligned_en_idx[cur_sent_idx],
+                    "script_idx": sent_idx,
+                    "prompt_idx": aligned_en_idx[sent_idx],
                     "tag": tag,
                 })
             else:
@@ -280,7 +280,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, cur_sent_idx):
         pending_text, pending_ms = combined, combined_ms
         print(f"Buffering: chars={significant_len(pending_text)}, ms={pending_ms}")
 
-    return pending_text, pending_ms, cur_sent_idx
+    return pending_text, pending_ms, sent_idx
 
 # Helpers for paragraph tracking
 def sent_idx_to_para_idx(sent_idx: int) -> int:
@@ -296,10 +296,10 @@ def para_idx_to_sent_idx(para_idx: int) -> tuple[int, int]:
         start, end = para_ranges[para_idx]
         return start, end
 
-def get_search_range(cur_sent_idx: int) -> tuple[int, int]:
-    if cur_sent_idx < 0 or cur_sent_idx >= TOTAL:
+def get_search_range(sent_idx: int) -> tuple[int, int]:
+    if sent_idx < 0 or sent_idx >= TOTAL:
         raise IndexError("Sentence index out of range")
-    para_idx = sent_idx_to_para_idx(cur_sent_idx)
+    para_idx = sent_idx_to_para_idx(sent_idx)
     start, end = para_idx_to_sent_idx(para_idx)
 
     # Expand search range by 1 paragraph before and 1 paragraphs after
@@ -325,22 +325,15 @@ def handle_uploaded_files(ws, cmd):
         return
     load_scripts_from_text(ws, ko_text, en_text)
 
-# VAD + alignment loop
-def vad_loop(ws: WSBridge):
-    global view_mode_in_para
+cur_sent_idx = 0
+cur_sent_idx_lock = threading.Lock()
 
-    cur_sent_idx = 0
+# Command processing loop
+def cmd_loop(ws: WSBridge):
+    global view_mode_in_para, cur_sent_idx
+
     last_sent_idx = -1
     last_sent_para_idx = -1
-    utter = []
-    in_utter = False
-    pending_text = ""
-    pending_ms = 0
-
-    speech_start_frames = 2  # 2 * FRAME_DURATION = 60ms to confirm speech start
-    silence_end_frames = 4   # 4 * FRAME_DURATION = 120ms to confirm end
-    speech_count = 0
-    silence_count = 0
 
     if aligned_ko and para_ranges:
         ws.send({
@@ -354,88 +347,119 @@ def vad_loop(ws: WSBridge):
         })
 
     while not should_stop():
-        cmd = ws.get_cmd_nowait()
+        try:
+            cmd = ws.get_cmd(timeout=0.1)
+        except queue.Empty:
+            continue
+        except Exception:
+            time.sleep(0.05)
+            continue
+
+        if not cmd:
+            continue
+
         t = ""
         if cmd:
             t = cmd.get("type")
             if t == "prev":
-                if view_mode_in_para:
-                    para_idx = sent_idx_to_para_idx(cur_sent_idx)
-                    if para_idx > 0:
-                        cur_sent_idx, _ = para_idx_to_sent_idx(para_idx - 1)
-                else:
-                    if cur_sent_idx > 0:
-                        cur_sent_idx -= 1
+                with cur_sent_idx_lock:
+                    if view_mode_in_para:
+                        para_idx = sent_idx_to_para_idx(cur_sent_idx)
+                        if para_idx > 0:
+                            cur_sent_idx, _ = para_idx_to_sent_idx(para_idx - 1)
+                    else:
+                        if cur_sent_idx > 0:
+                            cur_sent_idx -= 1
             elif t == "next":
-                if view_mode_in_para:
-                    para_idx = sent_idx_to_para_idx(cur_sent_idx)
-                    if para_idx < len(para_ranges) - 1:
-                        cur_sent_idx, _ = para_idx_to_sent_idx(para_idx + 1)
-                else:
-                    if cur_sent_idx < TOTAL - 1:
-                        cur_sent_idx += 1
+                with cur_sent_idx_lock:
+                    if view_mode_in_para:
+                        para_idx = sent_idx_to_para_idx(cur_sent_idx)
+                        if para_idx < len(para_ranges) - 1:
+                            cur_sent_idx, _ = para_idx_to_sent_idx(para_idx + 1)
+                    else:
+                        if cur_sent_idx < TOTAL - 1:
+                            cur_sent_idx += 1
             elif t == "go_to":
-                if view_mode_in_para:
-                    para_idx = cmd.get("idx", 0)
-                    if para_idx >= 0 and para_idx < len(para_ranges):
-                        cur_sent_idx, _ = para_idx_to_sent_idx(para_idx)
-                else:
-                    script_idx = cmd.get("idx", 0)
-                    if script_idx >= 0 and script_idx < TOTAL:
-                        cur_sent_idx = script_idx
+                with cur_sent_idx_lock:
+                    if view_mode_in_para:
+                        para_idx = cmd.get("idx", 0)
+                        if para_idx >= 0 and para_idx < len(para_ranges):
+                            cur_sent_idx, _ = para_idx_to_sent_idx(para_idx)
+                    else:
+                        script_idx = cmd.get("idx", 0)
+                        if script_idx >= 0 and script_idx < TOTAL:
+                            cur_sent_idx = script_idx
             elif t == "load_files":
-                handle_uploaded_files(ws, cmd)
-                cur_sent_idx = 0
-                last_sent_para_idx = -1
+                with cur_sent_idx_lock:
+                    handle_uploaded_files(ws, cmd)
+                    cur_sent_idx = 0
+                    last_sent_para_idx = -1
             elif t == "mute":
                 global is_muted
                 is_muted = bool(cmd.get("value", False))
                 print(f"Mute {'ON' if is_muted else 'OFF'}")
             elif t == "change_view_mode":
-                view_mode_in_para = bool(cmd.get("view_mode_in_para", False))
-                cur_sent_idx = 0
-                last_sent_para_idx = -1
-                print(f"View in {'paragraph' if view_mode_in_para else 'sentence'}")
-                ws.send({
-                    "type": "update_texts",
-                    "ko": aligned_ko_paras,
-                    "en": aligned_en_paras,
-                    "aligned_ko": aligned_ko,
-                    "aligned_en": aligned_en,
-                    "aligned_en_idx": aligned_en_idx,
-                    "view_mode_in_para": view_mode_in_para
-                })
+                with cur_sent_idx_lock:
+                    view_mode_in_para = bool(cmd.get("view_mode_in_para", False))
+                    cur_sent_idx = 0
+                    last_sent_para_idx = -1
+                    print(f"View in {'paragraph' if view_mode_in_para else 'sentence'}")
+                    ws.send({
+                        "type": "update_texts",
+                        "ko": aligned_ko_paras,
+                        "en": aligned_en_paras,
+                        "aligned_ko": aligned_ko,
+                        "aligned_en": aligned_en,
+                        "aligned_en_idx": aligned_en_idx,
+                        "view_mode_in_para": view_mode_in_para
+                    })
 
         if not aligned_ko:
             time.sleep(0.1)
             continue
 
-        para_idx = sent_idx_to_para_idx(cur_sent_idx)
-        base_sent_idx, _ = para_idx_to_sent_idx(para_idx)
-        if para_idx != last_sent_para_idx or t == "change_view_mode" or t == "load_files":
-            last_sent_para_idx = para_idx
-            last_sent_idx = cur_sent_idx
-            ws.send({
-                "type": "move",
-                "para_idx": para_idx,
-                "sent_idx_in_para": cur_sent_idx - base_sent_idx,
-                "script_idx": cur_sent_idx,
-                "prompt_idx": aligned_en_idx[cur_sent_idx],
-                "tag": aligned_tag[cur_sent_idx],
-                "reloading": t == "change_view_mode" or t == "load_files",
-            })
-        elif cur_sent_idx != last_sent_idx:
-            last_sent_idx = cur_sent_idx
-            ws.send({
-                "type": "move",
-                "para_idx": para_idx,
-                "sent_idx_in_para": cur_sent_idx - base_sent_idx,
-                "script_idx": cur_sent_idx,
-                "prompt_idx": aligned_en_idx[cur_sent_idx],
-                "tag": aligned_tag[cur_sent_idx],
-                "reloading": False,
-            })
+        with cur_sent_idx_lock:
+            para_idx = sent_idx_to_para_idx(cur_sent_idx)
+            base_sent_idx, _ = para_idx_to_sent_idx(para_idx)
+            if para_idx != last_sent_para_idx or t == "change_view_mode" or t == "load_files":
+                last_sent_para_idx = para_idx
+                last_sent_idx = cur_sent_idx
+                ws.send({
+                    "type": "move",
+                    "para_idx": para_idx,
+                    "sent_idx_in_para": cur_sent_idx - base_sent_idx,
+                    "script_idx": cur_sent_idx,
+                    "prompt_idx": aligned_en_idx[cur_sent_idx],
+                    "tag": aligned_tag[cur_sent_idx],
+                    "reloading": t == "change_view_mode" or t == "load_files",
+                })
+            elif cur_sent_idx != last_sent_idx:
+                last_sent_idx = cur_sent_idx
+                ws.send({
+                    "type": "move",
+                    "para_idx": para_idx,
+                    "sent_idx_in_para": cur_sent_idx - base_sent_idx,
+                    "script_idx": cur_sent_idx,
+                    "prompt_idx": aligned_en_idx[cur_sent_idx],
+                    "tag": aligned_tag[cur_sent_idx],
+                    "reloading": False,
+                })
 
+# VAD + alignment loop
+def vad_loop(ws: WSBridge):
+    global cur_sent_idx
+
+    utter = []
+    in_utter = False
+    pending_text = ""
+    pending_ms = 0
+
+    speech_start_frames = 2  # 2 * FRAME_DURATION = 60ms to confirm speech start
+    silence_end_frames = 4   # 4 * FRAME_DURATION = 120ms to confirm end
+    speech_count = 0
+    silence_count = 0
+
+    while not should_stop():
         try:
             frame = rt_audio_q.get(timeout=0.1)
         except queue.Empty:
@@ -464,18 +488,20 @@ def vad_loop(ws: WSBridge):
                 silence_count = 0
                 if len(utter) * FRAME_DURATION >= MAX_UTTER_LEN_IN_MS:
                     # force process when utterance is too long
-                    pending_text, pending_ms, cur_sent_idx = process_utterance(
-                        ws, utter, pending_text, pending_ms, cur_sent_idx
-                    )
+                    with cur_sent_idx_lock:
+                        pending_text, pending_ms, cur_sent_idx = process_utterance(
+                            ws, utter, pending_text, pending_ms, cur_sent_idx
+                        )
                     in_utter = False
                     speech_count = 0
                     utter = []
             else:
                 silence_count += 1
                 if silence_count >= silence_end_frames:
-                    pending_text, pending_ms, cur_sent_idx = process_utterance(
-                        ws, utter, pending_text, pending_ms, cur_sent_idx
-                    )
+                    with cur_sent_idx_lock:
+                        pending_text, pending_ms, cur_sent_idx = process_utterance(
+                            ws, utter, pending_text, pending_ms, cur_sent_idx
+                        )
                     in_utter = False
                     speech_count = 0
                     silence_count = 0
@@ -564,10 +590,12 @@ else:
 t1 = threading.Thread(target=audio_capture, daemon=True)
 t2 = threading.Thread(target=vad_loop, args=(ws,), daemon=True)
 t3 = threading.Thread(target=heartbeat_loop, args=(ws,), daemon=True)
+t4 = threading.Thread(target=cmd_loop, args=(ws,), daemon=True)
 
 t1.start()
 t2.start()
 t3.start()
+t4.start()
 print("Ready. Press Ctrl+C to stop.")
 
 try:
@@ -576,7 +604,7 @@ try:
 except KeyboardInterrupt:
     request_shutdown()
 
-for t in (t1, t2, t3):
+for t in (t1, t2, t3, t4):
     t.join(timeout=1.0)
 time.sleep(0.5)  # ensure background threads fully shutdown
 gc.collect()
