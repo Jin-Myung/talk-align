@@ -71,32 +71,80 @@ def parse_paragraphs_from_text(text: str) -> Dict[int, List[str]]:
         nonlocal cur_no, cur_buf
         if cur_no is None:
             return
-        # skip if already exists (avoid duplication)
         if cur_no in paras:
             return
         paragraph_text = ' '.join([s for s in cur_buf if s.strip()])
         sents = [s.strip() for s in split_sentences(paragraph_text)]
-        paras[cur_no] = [s for s in sents if s]
+        sents = [s for s in sents if s]
+
+        def split_long_sentence(sent: str) -> List[str]:
+            length = len(sent)
+            if length < 100:
+                return [sent]
+
+            if length < 150:
+                n = 2
+            elif length < 200:
+                n = 3
+            else:
+                n = 4
+
+            chunks = []
+            part_len = length // n
+            start = 0
+            for i in range(1, n):
+                mid = part_len * i
+                left = max(0, mid - 20)
+                right = min(length, mid + 20)
+                window = sent[left:right]
+
+                # Candidates of split points: semicolon, comma, space
+                cut = None
+                semi_pos = window.find(';')
+                comma_pos = window.find(',')
+                space_pos = window.find(' ')
+
+                if semi_pos != -1:
+                    cut = left + semi_pos + 1
+                elif comma_pos != -1:
+                    cut = left + comma_pos + 1
+                elif space_pos != -1:
+                    cut = left + space_pos + 1
+                else:
+                    cut = mid
+
+                chunks.append(sent[start:cut].strip())
+                start = cut
+
+            chunks.append(sent[start:].strip())
+
+            # Merge too short chunks
+            merged = []
+            for chunk in chunks:
+                if merged and len(chunk) < 20:
+                    merged[-1] += " " + chunk
+                else:
+                    merged.append(chunk)
+            return merged
+
+        expanded_sents = []
+        for s in sents:
+            expanded_sents.extend(split_long_sentence(s))
+        paras[cur_no] = expanded_sents
         cur_buf = []
 
     for ln in lines:
         m = _para_start_re.match(ln)
         if m:
-            # new paragraph
             flush()
             cur_no = int(m.group(1))
             tail = m.group(2) or ""
             cur_buf = [tail] if tail.strip() else []
         else:
-            # header or paragraph body continuation
             if cur_no is not None:
                 cur_buf.append(ln)
     flush()
     return paras
-
-def parse_paragraphs(path: str) -> Dict[int, List[str]]:
-    with open(path, 'r', encoding='utf-8') as f:
-        return parse_paragraphs_from_text(f.read())
 
 # Initialize model / audio / VAD
 model = WhisperModel("small", device="cpu", compute_type="int8")
