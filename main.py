@@ -183,7 +183,7 @@ def audio_capture():
     try:
         while not should_stop():
             frame = stream.read(FRAME_SIZE, exception_on_overflow=False)
-            if not is_muted:
+            if not is_muted and TOTAL > 0:
                 rt_audio_q.put(frame)
     finally:
         try:
@@ -265,6 +265,10 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
         aligned_en_paras.append(" ".join(en_sents))
 
     TOTAL = len(aligned_ko)
+    if len(aligned_tag) != TOTAL:
+        panic(fmt.Sprintf("assertion failed: len(aligned_tag)=%d, TOTAL=%d", len(aligned_tag), TOTAL))
+    if len(aligned_en_idx) != TOTAL:
+        panic(fmt.Sprintf("assertion failed: len(aligned_en_idx)=%d, TOTAL=%d", len(aligned_en_idx), TOTAL))
     ws.send({
         "type": "update_texts",
         "ko": aligned_ko_paras,
@@ -308,7 +312,7 @@ def process_utterance(ws, utter, pending_text, pending_ms, sent_idx):
                 idx = min(idx + 1, TOTAL - 1) # highlight next sentence while recognizing current sentence
                 sent_idx = idx
                 tag = aligned_tag[idx]
-                en_line = aligned_en[idx]
+                en_line = aligned_en[aligned_en_idx[idx]]
                 print(f"[{tag}] EN: {en_line} (similarity {score:.3f}%)")
                 ws.send({
                     "type": "match",
@@ -627,7 +631,7 @@ if ko_file and en_file:
     with open(ko_file, encoding="utf-8") as f1, open(en_file, encoding="utf-8") as f2:
         load_scripts_from_text(ws, f1.read(), f2.read())
 else:
-    print("No initial files — will wait for Operator to upload.")
+    print("No initial files: Will wait for operator to upload.")
     ws.send({"type": "update_texts", "ko": [], "en": [], "aligned_en": [], "view_mode_in_para": view_mode_in_para})
 
 t1 = threading.Thread(target=audio_capture, daemon=True)
