@@ -183,7 +183,7 @@ def audio_capture():
     try:
         while not should_stop():
             frame = stream.read(FRAME_SIZE, exception_on_overflow=False)
-            if not is_muted and TOTAL > 0:
+            if not is_muted:
                 rt_audio_q.put(frame)
     finally:
         try:
@@ -301,8 +301,12 @@ def process_utterance(ws, utter, pending_text, pending_ms, sent_idx):
     if significant_len(combined) >= MIN_UTTER_TEXT_LEN_FOR_MATCH and combined_ms >= MIN_UTTER_LEN_IN_MS_FOR_MATCH:
         ws.send({"type": "info", "msg": f"recognized: {combined}"})
 
-        start, end = get_search_range(sent_idx)
-        search_range = aligned_ko[start:end+1]
+        try:
+            start, end = get_search_range(sent_idx)
+        except IndexError:
+            search_range = []
+        else:
+            search_range = aligned_ko[start:end+1]
 
         if search_range:
             match, score, idx_rel = process.extractOne(combined, search_range, scorer=fuzz.partial_ratio)
@@ -323,8 +327,6 @@ def process_utterance(ws, utter, pending_text, pending_ms, sent_idx):
             else:
                 print(f"No matching script (similarity {score:.3f}%)")
                 ws.send({"type": "info", "msg": f"No match ({round(score,1)}%)"})
-        else:
-            ws.send({"type": "info", "msg": "No matching script (end of window)"})
 
         pending_text, pending_ms = "", 0
     else:
