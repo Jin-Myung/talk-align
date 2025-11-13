@@ -349,10 +349,7 @@ def get_search_range(sent_idx: int) -> tuple[int, int]:
     para_idx = sent_idx_to_para_idx(sent_idx)
     start, end = para_idx_to_sent_idx(para_idx)
 
-    # Expand search range by 1 paragraph before and 1 paragraphs after
-    if para_idx > 0:
-        prev_start, _ = para_idx_to_sent_idx(para_idx - 1)
-        start = prev_start
+    # Expand search range by 1 paragraphs after
     if para_idx < len(para_ranges) - 1:
         _, next_end = para_idx_to_sent_idx(para_idx + 1)
         end = next_end
@@ -642,7 +639,7 @@ t1.start()
 t2.start()
 t3.start()
 t4.start()
-print("Ready. Press Ctrl+C to stop.")
+print("Ready. Press Ctrl+C to stop.\n")
 
 try:
     while not should_stop():
