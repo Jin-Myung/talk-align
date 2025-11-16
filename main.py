@@ -215,6 +215,33 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
     global aligned_ko_paras, aligned_en_paras, para_ranges
     global TOTAL
 
+    def merge_short_sentences(sents: list[str], threshold: int) -> list[str]:
+        merged = []
+        buf = ""
+        for s in sents:
+            s = s.strip()
+            if not s:
+                continue
+
+            if len(s) <= threshold:
+                if merged:
+                    merged[-1] = merged[-1].rstrip() + " " + s
+                else:
+                    buf = (buf + " " + s).strip()
+            else:
+                if buf:
+                    merged.append(buf + " " + s)
+                    buf = ""
+                else:
+                    merged.append(s)
+
+        if buf:
+            if merged:
+                merged[-1] = merged[-1] + " " + buf
+            else:
+                merged.append(buf)
+        return merged
+
     ko_paras = parse_paragraphs_from_text(ko_text)
     en_paras = parse_paragraphs_from_text(en_text)
 
@@ -228,8 +255,8 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
     line_counter = 0
 
     for pid in common_ids:
-        # Align sentences in each paragraph
-        ko_sents, en_sents = ko_paras[pid], en_paras[pid]
+        ko_sents = merge_short_sentences(ko_paras[pid], 12)
+        en_sents = merge_short_sentences(en_paras[pid], 20)
         len_ko_sent = len(ko_sents)
         len_en_sent = len(en_sents)
         start = line_counter
@@ -266,9 +293,10 @@ def load_scripts_from_text(ws, ko_text: str, en_text: str):
 
     TOTAL = len(aligned_ko)
     if len(aligned_tag) != TOTAL:
-        panic(fmt.Sprintf("assertion failed: len(aligned_tag)=%d, TOTAL=%d", len(aligned_tag), TOTAL))
+        raise AssertionError(f"assertion failed: len(aligned_tag)={len(aligned_tag)}, TOTAL={TOTAL}")
     if len(aligned_en_idx) != TOTAL:
-        panic(fmt.Sprintf("assertion failed: len(aligned_en_idx)=%d, TOTAL=%d", len(aligned_en_idx), TOTAL))
+        raise AssertionError(f"assertion failed: len(aligned_en_idx)={len(aligned_en_idx)}, TOTAL={TOTAL}")
+
     ws.send({
         "type": "update_texts",
         "ko": aligned_ko_paras,
