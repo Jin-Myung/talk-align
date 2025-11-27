@@ -13,7 +13,11 @@ app.mount("/public", StaticFiles(directory="public"), name="public")
 @app.get("/")
 def root():
     return HTMLResponse("""
-<!doctype html><meta charset="utf-8">
+<!doctype html>
+<head>
+    <meta charset="utf-8">
+    <link rel="icon" type="image/png" href="/public/favicon.png">
+</head>
 <h3>Talk Align</h3>
 <ul>
   <li><a href="/public/operator.html">Operator View</a></li>
